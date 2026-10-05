@@ -22,9 +22,9 @@ def main() -> None:
         print(f"Critical error initializing schema tables: {db_err}", file=sys.stderr)
         sys.exit(1)
 
-    # Configuration definitions (Fetching standard meteorology stations data)
+    # KLAR OG RETTET URL: Bruger DMI's nye, åbne API-endpoint (kræver ingen nøgle)
     dmi_endpoint = (
-        "https://dmi.dk"
+        "https://opendataapi.dmi.dk/v2/metObs/collections/observation/items"
     )
     station_id = "DMI-STATION-COPENHAGEN"
     station_name = "DMI Copenhagen Main Station"
