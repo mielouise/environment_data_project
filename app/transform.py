@@ -68,17 +68,25 @@ class DMIDataTransformer:
             parameter_id = properties.get("parameterId")
             value = properties.get("value")
 
-            if not observed_time or parameter_id not in ("temp", "rh") or value is None:
+            if not observed_time or value is None:
                 continue
 
             if observed_time not in grouped_by_time:
                 grouped_by_time[observed_time] = {}
 
-            grouped_by_time[observed_time][parameter_id] = float(value)
+            # Aligned to support both standard identifiers and DMI v2 raw mapping values
+            if parameter_id in ("temp", "temp_dry"):
+                grouped_by_time[observed_time]["temp"] = float(value)
+            elif parameter_id in ("rh", "humidity", "humidity_past1h"):
+                grouped_by_time[observed_time]["rh"] = float(value)
 
         # Second pass: Construct type-safe DTOs from grouped parameters
         transformed_records: List[MeasurementDTO] = []
         for time_str, data in grouped_by_time.items():
+            # Skip timestamps that do not contain any of our targeted metrics
+            if "temp" not in data and "rh" not in data:
+                continue
+                
             try:
                 # Handle standard ISO format and replace Z anchor for timezone safety
                 timestamp = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
