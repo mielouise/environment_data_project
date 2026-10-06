@@ -24,7 +24,7 @@ def main() -> None:
 
     # KLAR OG RETTET URL: Bruger DMI's nye, åbne API-endpoint (kræver ingen nøgle)
     dmi_endpoint = (
-        "https://opendataapi.dmi.dk/v2/metObs/collections/observation/items"
+        "https://opendataapi.dmi.dk/v2/metObs/collections"
     )
     station_id = "DMI-STATION-COPENHAGEN"
     station_name = "DMI Copenhagen Main Station"
