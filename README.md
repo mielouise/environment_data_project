@@ -42,7 +42,6 @@ environment_data_project/
 │   ├── services/
 │   └── main.py
 ├── tests/
-├── sql/
 ├── docker-compose.yml
 ├── requirements.txt
 └── README.md
