@@ -1,75 +1,129 @@
-# Miljødata ETL-Pipeline & Data Warehouse – Uge 1
+# Miljødata-projekt
 
-Dette projekt udgør fundamentet i et 5-ugers forløb med fokus på datadrevet vurdering af kvaliteten af det fysiske arbejdsmiljø. I denne første uge har vi etableret en robust, fuldt testet og automatiseret **ETL-pipeline (Extract, Transform, Load)** i Python, som indhenter meteorologiske realtidsmålinger fra DMI's åbne API og indlæser dem i en struktureret PostgreSQL-database.
+Dette projekt er en ETL-pipeline til indsamling, transformation og lagring af miljødata fra Danmarks Meteorologiske Institut (DMI). Data hentet fra DMI's åbne API bliver normaliseret og gemt i en PostgreSQL-database, så det kan bruges til videre analyse, rapportering eller visualisering.
 
-Systemet er udviklet med fokus på høj datakvalitet, fravær af dubletter (**idempotens**) og en fuldstændig modulær, objektorienteret softwarearkitektur (OOP). Dette sikrer, at uge 1-koden let kan udvides med fysiske hardware-sensorer (DS18B20, BME280, BMV080 og SCD41) i de kommende uger.
+## Formål
 
----
+Projektet har til formål at:
+- hente miljødata fra en ekstern datakilde
+- rydde og strukturere data i et ensartet format
+- transformere rådata til datamodels, der passer til database-lagring
+- gemme data i PostgreSQL
+- gøre projektet nemt at køre lokalt via Docker og testbar via pytest
 
-## 🏗️ Softwarearkitektur
+## Oversigt over løsningen
 
-Kildekoden er struktureret efter **Clean Code**-principper, overholder **PEP 8**-retningslinjerne til punkt og prikke og følger **SOLID-principperne**. Vi anvender en klar lagdeling (Separation of Concerns) ved hjælp af objektorienteret programmering:
+Projektet består af fire hovedfaser:
 
-### Modulopbygning (`app/`)
-* **`app/extract.py`**: Dataindfasningslaget. Definerer en abstrakt basisklasse (`SensorDataSource`), som sikrer en fælles kontrakt for alle fremtidige datakilder. `DMIDataSource` arver herfra og håndterer HTTP-forbindelsen til DMI med fejlsikker infrastruktur-håndtering.
-* **`app/transform.py`**: Datatransformations- og valideringslaget. Transformer rå, ustrukturerede GeoJSON-parametre (f.eks. `temp_dry` og `humidity`) til stærkt typede, validerede datastrukturer via en `MeasurementDTO` (Data Transfer Object).
-* **`app/load.py`**: Dataindlæsningslaget. Implementerer *Repository-mønstret* for at afkoble SQL-transaktioner fra forretningslogikken. Håndterer batch-indlæsning og sikrer data-integritet.
-* **`app/database.py`**: Administrerer databaseforbindelser og databaseskema-initialisering for PostgreSQL.
-* **`app/main.py`**: Det centrale orkestreringspunkt, der binder ETL-komponenterne sammen via *Dependency Injection*.
+1. Extract
+   - Henter rå data fra DMI API
+2. Transform
+   - Normaliserer data til interne DTO-objekter
+3. Load
+   - Gemmer metadata og målinger i PostgreSQL
+4. Orchestration
+   - Kører hele ETL-flowet via app.main
 
-### Databasedesign (Star Schema)
-For at opfylde kravet om, at det skal være simpelt at sammenligne data på tværs af målestationer og kilder, er databasen designet som et stjerneskema:
-1. **`dim_sources` (Dimensionstabel)**: Registrerer kildernes metadata (`source_id`, `source_name`, `source_type`). Systemet differentierer her let mellem `API_DMI` og fremtidige `HARDWARE_SENSOR` værdier.
-2. **`fact_measurements` (Faktatabel)**: Den centrale tabel, der rummer alle fysiske målinger. Den har prædefinerede numeriske kolonner til både klima- og arbejdsmiljøparametre (CO2-niveauer og partikler), hvilket muliggør direkte tværgående SQL-analyser. Den anvender en `UNIQUE (source_id, timestamp)` constraint for at sikre **idempotens** (ingen dubletter ved gentagne kørsler).
+## Teknologier
 
----
+- Python 3.12
+- PostgreSQL 16
+- psycopg
+- requests
+- pytest
+- Docker / Docker Compose
+- pgAdmin 4
+- Mermaid (til dokumentationsdiagrammer)
 
-## 📊 UML-diagram (Sekvensdiagram for ETL-flowet)
+## Projektstruktur
 
-Følgende diagram illustrerer, hvordan data flyder igennem systemets klasser under en fuld afvikling af ETL-pipelinen:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Main as app/main.py
-    participant DB as app/database.py
-    participant Extract as app/extract.py (DMIDataSource)
-    participant Transform as app/transform.py (DMIDataTransformer)
-    participant Load as app/load.py (MeasurementRepository)
-    participant Postgres as PostgreSQL Server
-
-    Main->>DB: create_tables()
-    DB->>Postgres: CREATE TABLE IF NOT EXISTS dim_sources & fact_measurements
-    
-    Main->>Extract: fetch()
-    Extract->>DMI API: HTTP GET (opendataapi.dmi.dk)
-    DMI API-->>Extract: Returner rå GeoJSON Payload
-    Extract-->>Main: Returner Dict-struktur
-    
-    Main->>Transform: transform(raw_json)
-    Note over Transform: Parser 'temp_dry' og 'humidity', grupperer på tidsstempel
-    Transform-->>Main: Returner liste af [MeasurementDTO]
-    
-    Main->>Load: save_source(id, name, type)
-    Load->>Postgres: INSERT INTO dim_sources ON CONFLICT DO NOTHING
-    
-    Main->>Load: save_measurements(clean_records)
-    Load->>Postgres: BATCH INSERT INTO fact_measurements ON CONFLICT DO UPDATE
-    Postgres-->>Main: Pipeline afviklet succesfuldt (Commit)
+```text
+environment_data_project/
+├── app/
+│   ├── __init__.py
+│   ├── calculator.py
+│   ├── database.py
+│   ├── extract.py
+│   ├── load.py
+│   ├── main.py
+│   └── transform.py
+├── tests/
+│   ├── integration/
+│   └── unit/
+├── pgadmin/
+│   └── servers.json
+├── .devcontainer/
+│   ├── devcontainer.json
+│   ├── Dockerfile
+│   └── devcontainer-lock.json
+├── .dockerignore
+├── .env
+├── .gitignore
+├── docker-compose.yml
+├── Dockerfile
+├── requirements.txt
+├── requirements-dev.txt
+└── README.md
 ```
 
----
+## Arkitektur
 
-## 🛠️ Setup & Kørselsguide
+```mermaid
+flowchart LR
+    A[DMI API] --> B[Extract Module]
+    B --> C[Transform Module]
+    C --> D[Measurement DTO]
+    D --> E[Load Module]
+    E --> F[PostgreSQL Database]
+    F --> G[pgAdmin]
+    H[Docker Compose] --> B
+    H --> E
+    H --> F
+    H --> G
+```
 
-Projektet kører isoleret i **Docker-containere**, hvilket sikrer identiske miljøer under udvikling, test og produktion.
+## Datamodeller
 
-### Forudsætninger
-* **Docker Desktop** skal være aktivt i baggrunden på din maskine.
-* **VS Code** med udvidelsen **Dev Containers** anbefales til udvikling (giver fuld IntelliSense inde i containeren).
+Projektet bruger en dataklasse til at repræsentere målinger:
 
-### 1. Konfiguration af miljøvariabler (.env)
-Opret en fil med navnet `.env` i projektets rodmappe, og indsæt følgende konfiguration:
+- MeasurementDTO
+  - source_id
+  - timestamp
+  - temperature
+  - humidity
+  - co2_ppm
+  - particulate_matter_pm25
+
+Derudover oprettes der database-tabeller til:
+- dim_sources
+- fact_measurements
+
+## Database
+
+Projektet opretter automatisk tabeller i PostgreSQL ved start af ETL-pipeline.
+
+### dim_sources
+Gemmer metadata om kilder:
+
+- source_id
+- source_name
+- source_type
+
+### fact_measurements
+Gemmer faktisk måledata:
+
+- measurement_id
+- source_id
+- timestamp
+- temperature
+- humidity
+- co2_ppm
+- particulate_matter_pm25
+
+## Konfiguration
+
+Miljøvariabler ligger i `.env`:
+
 ```env
 POSTGRES_DB=postgres_db
 POSTGRES_USER=admin
@@ -80,54 +134,65 @@ PGADMIN_USER_EMAIL=admin@example.com
 PGADMIN_PASSWORD=password
 ```
 
-### 2. Byg og kør applikationen (ETL-Pipeline)
-For at bygge koden helt rent og afvikle pipelinen mod DMI's live Open Data API, køres følgende i din terminal:
+## Kør projektet
+
+### 1. Klon repositoryet
+
 ```bash
-docker compose build --no-cache app
-docker compose up app
+git clone https://github.com/dit-brugernavn/environment_data_project.git
+cd environment_data_project
 ```
 
-### 3. Afvikling af enhedstests (Testdækning ≥95%)
-For at køre test-suiten og generere den formelt krævede dækningsrapport i terminalen, køres:
+### 2. Start med Docker Compose
+
+```bash
+docker compose up run --build app
+```
+
+Dette starter:
+- Python-applikationen
+- PostgreSQL
+- pgAdmin
+
+pgAdmin er tilgængelig på:
+- http://localhost:8080
+
+## Kør tests
+
 ```bash
 docker compose run --build --rm tests
 ```
-*Systemet anvender `pytest` og `pytest-cov` med omfattende mocking af netværk og databasedrivere for at isolere unit-tests og opnå en samlet dækning på over 95%.*
 
-### 4. Datavalidering i pgAdmin
-Start administrationsværktøjet pgAdmin:
-```bash
-docker compose up -d pgadmin
-```
-Gå til `http://localhost:8080/` i din browser, log ind med dine pgAdmin-credentials fra `.env`, og åbn **Query Tool** på din database for at verificere indlæsningen.
 
----
+## Opgaveflow i projektet
 
-## 🔍 Verifikations- og Datasammenlignings-queries
+1. Hent data fra DMI API
+2. Parse JSON-responsen
+3. Transformér rådata til DTO'er
+4. Gem kildeinformation i dim_sources
+5. Gem målinger i fact_measurements
+6. Valider resultater via tests
 
-Følgende SQL-sætninger anvendes i pgAdmin til at bekræfte dataopsamlingen samt imødekomme projektets krav om simpel sammenligning på tværs af målestationer:
+## Testning
 
-### A. Udtræk af komplette målinger (Uden NULL-værdier)
-DMI leverer vejr-observationer asynkront. Denne query sikrer et rent datasæt uden tomme værdier:
-```sql
-SELECT 
-    measurement_id, source_id, timestamp, temperature, humidity
-FROM fact_measurements
-WHERE temperature IS NOT NULL 
-  AND humidity IS NOT NULL
-ORDER BY timestamp DESC
-LIMIT 50;
-```
+Projektet inkluderer både:
+- unit tests
+- integration tests
 
-### B. Forberedt tværgående sammenlignings-query (Kravopfyldelse)
-Når der i de kommende uger tilføjes hardware-sensorer (f.eks. indendørs temperatursensorer), kan inde- og udeklima sammenlignes direkte på tidsstempler med denne pivot-struktur:
-```sql
-SELECT 
-    timestamp,
-    MAX(CASE WHEN source_id = 'DMI-STATION-COPENHAGEN' THEN temperature END) as dmi_ude_temp,
-    MAX(CASE WHEN source_id = 'SENSOR-DS18B20-01' THEN temperature END) as rum_inde_temp
-FROM fact_measurements
-GROUP BY timestamp
-ORDER BY timestamp DESC
-LIMIT 100;
-```
+Testområder omfatter blandt andet:
+- databaseforbindelse
+- transformeringslogik
+- load-logik
+- main-flow
+- ekstraktionslogik
+
+## Noter
+
+- Projektet er designet til at være nemt at udvide med flere datakilder
+- PostgreSQL og pgAdmin kører via Docker Compose
+- DMI API'en anvendes som eksternt datagrundlag
+- Projektet er velegnet til videre udvikling som ETL- eller dataengineering-projekt
+
+## Forfatter
+
+Mie Louise Nielsen
