@@ -11,9 +11,9 @@ from app.database import (
     get_db_connection,
 )
 from app.etl_service import ETLService
-from extract import DMIDataSource
-from load import MeasurementRepository
-from transform import DMIDataTransformer
+from app.extract import DMIDataSource
+from app.load import MeasurementRepository
+from app.transform import DMIDataTransformer
 
 
 def main() -> None:
