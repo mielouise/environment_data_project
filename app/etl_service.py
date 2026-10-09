@@ -3,9 +3,9 @@
 Coordinates the complete Extract, Transform, and Load workflow.
 """
 
-from extract import DMIDataSource
-from load import MeasurementRepository
-from transform import (
+from app.extract import DMIDataSource
+from app.load import MeasurementRepository
+from app.transform import (
     DMIDataTransformer,
     MeasurementDTO,
 )
