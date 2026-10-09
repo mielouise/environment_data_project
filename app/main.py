@@ -10,7 +10,7 @@ from app.database import (
     create_tables,
     get_db_connection,
 )
-from etl_service import ETLService
+from app.etl_service import ETLService
 from extract import DMIDataSource
 from load import MeasurementRepository
 from transform import DMIDataTransformer
