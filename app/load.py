@@ -6,8 +6,8 @@ from datetime import (
 )
 from unittest.mock import MagicMock
 
-from app.load import MeasurementRepository
-from app.transform import MeasurementDTO
+from load import MeasurementRepository
+from transform import MeasurementDTO
 
 
 def test_save_source():

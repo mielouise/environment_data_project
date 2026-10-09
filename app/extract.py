@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from requests import RequestException
 
-from app.extract import DMIDataSource
+from extract import DMIDataSource
 
 
 @patch("app.extract.requests.get")
