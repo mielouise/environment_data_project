@@ -57,13 +57,15 @@ def create_tables() -> None:
         """
         CREATE TABLE IF NOT EXISTS fact_measurements (
             measurement_id SERIAL PRIMARY KEY,
-            source_id VARCHAR(50)
+
+            source_id VARCHAR(50) NOT NULL
                 REFERENCES dim_sources(source_id),
 
-            parameter_id INTEGER
+            parameter_id INTEGER NOT NULL
                 REFERENCES dim_parameters(parameter_id),
 
             timestamp TIMESTAMPTZ NOT NULL,
+
             value NUMERIC(10, 2) NOT NULL,
 
             CONSTRAINT unique_measurement
@@ -85,8 +87,10 @@ def create_tables() -> None:
 
             cursor.execute(
                 """
-                INSERT INTO dim_parameters
-                    (parameter_name, unit)
+                INSERT INTO dim_parameters (
+                    parameter_name,
+                    unit
+                )
                 VALUES
                     ('Temperature', '°C'),
                     ('Humidity', '%'),
