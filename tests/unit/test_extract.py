@@ -25,6 +25,7 @@ def test_dmi_data_source_fetch_success(
             }
         ]
     }
+    mock_response.raise_for_status.return_value = None
 
     mock_get.return_value = mock_response
 
@@ -46,6 +47,7 @@ def test_dmi_data_source_fetch_success(
         ]
     }
 
+    mock_response.raise_for_status.assert_called_once_with()
     mock_get.assert_called_once_with(
         "http://fake-url.com",
         timeout=10
@@ -82,3 +84,30 @@ def test_dmi_data_source_fetch_failure(
         exc_info.value.__cause__
         == underlying_error
     )
+
+
+@patch("app.extract.requests.get")
+def test_dmi_data_source_fetch_http_failure(
+    mock_get
+):
+    """Verify unsuccessful HTTP responses are raised as RuntimeError."""
+
+    underlying_error = RequestException("HTTP request failed")
+    mock_response = MagicMock()
+    mock_response.raise_for_status.side_effect = underlying_error
+    mock_get.return_value = mock_response
+
+    source = DMIDataSource(
+        source_id="TEST-01",
+        source_name="Test Station",
+        url="http://fake-url.com"
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Failed to retrieve DMI data"
+    ) as exc_info:
+        source.fetch()
+
+    assert exc_info.value.__cause__ is underlying_error
+    mock_response.json.assert_not_called()

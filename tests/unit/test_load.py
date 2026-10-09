@@ -32,6 +32,14 @@ def test_save_source():
     )
 
     mock_cursor.execute.assert_called_once()
+    query, parameters = mock_cursor.execute.call_args.args
+    assert "INSERT INTO dim_sources" in query
+    assert "ON CONFLICT (source_id)" in query
+    assert parameters == (
+        "SOURCE-01",
+        "Sensor Name",
+        "API_DMI",
+    )
 
     mock_conn.commit.assert_called_once()
 
@@ -70,6 +78,25 @@ def test_save_measurements_success():
     )
 
     mock_cursor.executemany.assert_called_once()
+    query, rows = mock_cursor.executemany.call_args.args
+    assert "INSERT INTO fact_measurements" in query
+    assert "ON CONFLICT" in query
+    assert "DO UPDATE SET" in query
+    assert rows == [
+        (
+            "DMI",
+            1,
+            datetime(
+                2026,
+                10,
+                5,
+                12,
+                0,
+                tzinfo=timezone.utc
+            ),
+            15.0,
+        )
+    ]
 
     mock_conn.commit.assert_called_once()
 
