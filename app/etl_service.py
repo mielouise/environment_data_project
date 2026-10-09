@@ -1,0 +1,60 @@
+"""ETL orchestration service.
+
+Coordinates the complete Extract, Transform, and Load workflow.
+"""
+
+from app.extract import DMIDataSource
+from app.load import MeasurementRepository
+from app.transform import DMIDataTransformer
+from app.models.measurement import MeasurementDTO
+
+
+class ETLService:
+    """Execute environmental ETL pipeline."""
+
+    def __init__(
+        self,
+        source: DMIDataSource,
+        transformer: DMIDataTransformer,
+        repository: MeasurementRepository
+    ) -> None:
+        """Initialize ETL service.
+
+        Args:
+            source:
+                Environmental data source.
+
+            transformer:
+                Transformation service.
+
+            repository:
+                Repository responsible for persistence.
+        """
+        self._source = source
+        self._transformer = transformer
+        self._repository = repository
+
+    def run(self) -> int:
+        """Run the ETL pipeline.
+
+        Returns:
+            Number of measurements processed.
+        """
+
+        raw_data = self._source.fetch()
+
+        measurements: list[MeasurementDTO] = (
+            self._transformer.transform(raw_data)
+        )
+
+        self._repository.save_source(
+            source_id=self._source.source_id,
+            source_name=self._source.source_name,
+            source_type="API_DMI"
+        )
+
+        self._repository.save_measurements(
+            measurements
+        )
+
+        return len(measurements)

@@ -1,89 +1,93 @@
-"""Module for extracting raw environmental data from external sources.
+"""Environmental data extraction layer.
 
-This module implements the abstraction layer for data ingestion. It defines
-a common interface for all future hardware sensors and web APIs, and provides
-the specific implementation for fetching open-access weather data from DMI.
+Defines the abstraction for all environmental data sources and
+implements the DMI Observation API client.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Union
+from typing import Any
+
 import requests
 
 
 class SensorDataSource(ABC):
-    """Abstract Base Class defining the interface for all environmental data inputs.
+    """Abstract base class for environmental data sources."""
 
-    Acts as a contract ensuring that any future hardware components or API integration
-    services implement a unified extraction methodology.
-
-    Attributes:
-        source_id: Unique alphanumeric identifier for the data source.
-        source_name: User-friendly name describing the physical sensor or API endpoint.
-    """
-
-    def __init__(self, source_id: str, source_name: str) -> None:
-        """Initializes the base data source components.
+    def __init__(
+        self,
+        source_id: str,
+        source_name: str
+    ) -> None:
+        """Initialize the data source.
 
         Args:
-            source_id: Unique identifier for the reporting entity.
-            source_name: Human-readable name or label for the source.
+            source_id:
+                Unique source identifier.
+
+            source_name:
+                Human-readable source name.
         """
         self.source_id = source_id
         self.source_name = source_name
 
     @abstractmethod
-    def fetch(self) -> Union[Dict[str, Any], list]:
-        """Fetches raw data payload from the designated origin channel.
-
-        This method must be overridden by specific subclass implementations.
+    def fetch(self) -> dict[str, Any]:
+        """Fetch data from the source.
 
         Returns:
-            The raw data structures, typically a dictionary or an array of packets.
-
-        Raises:
-            RuntimeError: If data retrieval encounters an infrastructure failure.
+            Raw JSON payload.
         """
-        pass
+        raise NotImplementedError
 
 
 class DMIDataSource(SensorDataSource):
-    """Data source implementation targeting DMI's open meteorological Web API.
+    """Client for the DMI Meteorological Observation API."""
 
-    Handles network connectivity and ensures graceful exceptions when querying the public
-    observation server endpoints.
-    """
-
-    def __init__(self, source_id: str, source_name: str, url: str) -> None:
-        """Initializes the DMI data source with connection endpoints.
+    def __init__(
+        self,
+        source_id: str,
+        source_name: str,
+        url: str
+    ) -> None:
+        """Initialize DMI data source.
 
         Args:
-            source_id: Unique station identifier.
-            source_name: Name of the geographical area or station.
-            url: Full URL string endpoint targeting the open data REST API.
+            source_id:
+                Source identifier.
+
+            source_name:
+                Human-readable source name.
+
+            url:
+                DMI API endpoint.
         """
-        super().__init__(source_id, source_name)
+        super().__init__(
+            source_id=source_id,
+            source_name=source_name
+        )
         self.url = url
 
-    def fetch(self) -> Dict[str, Any]:
-        """Queries the open DMI API endpoint to gather recent climate records.
-
-        Enforces safe HTTP request behaviors by setting strict timeout rules.
+    def fetch(self) -> dict[str, Any]:
+        """Fetch raw observations from DMI.
 
         Returns:
-            A dictionary containing raw GeoJSON spatial observation elements.
+            Raw JSON response from the API.
 
         Raises:
-            RuntimeError: Wrapped connection/protocol errors indicating a down API.
+            RuntimeError:
+                If the HTTP request fails.
         """
         try:
-            # Set a 10-second request timeout to prevent blocking application pipelines
-            response = requests.get(self.url, timeout=10)
+            response = requests.get(
+                self.url,
+                timeout=10
+            )
+
             response.raise_for_status()
-            
-            # Explicitly cast response data structure as a dictionary payload
-            raw_payload: Dict[str, Any] = response.json()
-            return raw_payload
-            
+
+            return response.json()
+
         except requests.RequestException as err:
-            # Clean Code: Translate technical low-level stack errors into explicit messages
-            raise RuntimeError(f"Kunne ikke hente data fra DMI: {err}") from err
+            raise RuntimeError(
+                f"Failed to retrieve DMI data: {err}"
+            ) from err

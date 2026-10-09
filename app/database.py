@@ -1,43 +1,76 @@
-"""Module managing the PostgreSQL database connection and schema initialization."""
+"""Database connection and schema initialization utilities.
+
+This module is responsible for:
+
+- Establishing PostgreSQL connections.
+- Initializing the database schema.
+- Seeding dimension tables with default values.
+"""
 
 import os
 import sys
 from typing import Any
+
 import psycopg
 
 
 def get_connection() -> Any:
-    """Creates and returns a connection instance to the PostgreSQL container database.
-
-    Aligned to match the project's pre-configured integration tests.
+    """Create and return a PostgreSQL database connection.
 
     Returns:
-        A live connection object mapping to the environment variables specifications.
+        Active PostgreSQL connection.
+
+    Raises:
+        Exception:
+            Raised if connection establishment fails.
     """
     try:
         return psycopg.connect(
-            host=os.environ.get("POSTGRES_HOST", "db"),
-            dbname=os.environ.get("POSTGRES_DB", "postgres_db"),
-            user=os.environ.get("POSTGRES_USER", "admin"),
-            password=os.environ.get("POSTGRES_PASSWORD", "password"),
-            port=os.environ.get("POSTGRES_PORT", "5432")
+            host=os.environ.get(
+                "POSTGRES_HOST",
+                "db"
+            ),
+            dbname=os.environ.get(
+                "POSTGRES_DB",
+                "postgres_db"
+            ),
+            user=os.environ.get(
+                "POSTGRES_USER",
+                "admin"
+            ),
+            password=os.environ.get(
+                "POSTGRES_PASSWORD",
+                "password"
+            ),
+            port=os.environ.get(
+                "POSTGRES_PORT",
+                "5432"
+            )
         )
+
     except Exception as err:
-        print(f"Database connection establishment failed: {err}", file=sys.stderr)
+        print(
+            f"Database connection establishment failed: {err}",
+            file=sys.stderr
+        )
         raise
 
 
 def get_db_connection() -> Any:
-    """Alias pointing to get_connection to support internal ETL pipeline components.
+    """Return an active PostgreSQL connection.
 
     Returns:
-        An active database connection object.
+        Active PostgreSQL connection.
     """
     return get_connection()
 
 
 def create_tables() -> None:
-    """Initialize the database schema."""
+    """Initialize database schema.
+
+    Creates all dimension and fact tables required by the
+    environmental ETL pipeline and seeds the parameter dimension.
+    """
 
     commands = (
         """
@@ -49,8 +82,8 @@ def create_tables() -> None:
         """,
         """
         CREATE TABLE IF NOT EXISTS dim_parameters (
-            parameter_id SERIAL PRIMARY KEY,
-            parameter_name VARCHAR(50) NOT NULL UNIQUE,
+            parameter_id INTEGER PRIMARY KEY,
+            parameter_name VARCHAR(100) NOT NULL UNIQUE,
             unit VARCHAR(20) NOT NULL
         );
         """,
@@ -75,6 +108,18 @@ def create_tables() -> None:
                     timestamp
                 )
         );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_fact_measurements_timestamp
+        ON fact_measurements (timestamp);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_fact_measurements_source
+        ON fact_measurements (source_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_fact_measurements_parameter
+        ON fact_measurements (parameter_id);
         """
     )
 
@@ -82,26 +127,33 @@ def create_tables() -> None:
 
     try:
         with conn.cursor() as cursor:
+
             for command in commands:
                 cursor.execute(command)
 
             cursor.execute(
                 """
                 INSERT INTO dim_parameters (
+                    parameter_id,
                     parameter_name,
                     unit
                 )
                 VALUES
-                    ('Temperature', '°C'),
-                    ('Humidity', '%'),
-                    ('CO2', 'ppm'),
-                    ('PM2.5', 'μg/m³')
-                ON CONFLICT (parameter_name)
+                    (1, 'Temperature', '°C'),
+                    (2, 'Humidity', '%'),
+                    (3, 'Humidity Past 1 Hour', '%'),
+                    (4, 'CO2', 'ppm'),
+                    (5, 'PM2.5', 'μg/m³')
+                ON CONFLICT (parameter_id)
                 DO NOTHING;
                 """
             )
 
         conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
 
     finally:
         conn.close()
