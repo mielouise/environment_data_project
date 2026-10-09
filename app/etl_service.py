@@ -5,8 +5,10 @@ Coordinates the complete Extract, Transform, and Load workflow.
 
 from app.extract import DMIDataSource
 from app.load import MeasurementRepository
-from app.transform import DMIDataTransformer
-from app.models.measurement import MeasurementDTO
+from app.transform import (
+    DMIDataTransformer,
+    MeasurementDTO,
+)
 
 
 class ETLService:
@@ -18,18 +20,7 @@ class ETLService:
         transformer: DMIDataTransformer,
         repository: MeasurementRepository
     ) -> None:
-        """Initialize ETL service.
-
-        Args:
-            source:
-                Environmental data source.
-
-            transformer:
-                Transformation service.
-
-            repository:
-                Repository responsible for persistence.
-        """
+        """Initialize ETL service."""
         self._source = source
         self._transformer = transformer
         self._repository = repository

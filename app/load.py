@@ -4,16 +4,13 @@ Implements the Repository pattern and encapsulates all database
 interaction logic for dimension tables and fact tables.
 """
 
-from app.models.measurement import MeasurementDTO
+from app.transform import MeasurementDTO
 
 
 class MeasurementRepository:
-    """Repository responsible for persisting environmental measurements."""
+    """Repository responsible for persisting environmental data."""
 
-    def __init__(
-        self,
-        db_connection
-    ) -> None:
+    def __init__(self, db_connection) -> None:
         """Initialize repository.
 
         Args:
@@ -28,18 +25,7 @@ class MeasurementRepository:
         source_name: str,
         source_type: str
     ) -> None:
-        """Persist source metadata in dim_sources.
-
-        Args:
-            source_id:
-                Unique identifier of the source.
-
-            source_name:
-                Human-readable source name.
-
-            source_type:
-                Classification of the source.
-        """
+        """Persist source metadata into dim_sources."""
 
         query = """
             INSERT INTO dim_sources (
@@ -68,15 +54,7 @@ class MeasurementRepository:
         self,
         records: list[MeasurementDTO]
     ) -> None:
-        """Persist measurement records into fact_measurements.
-
-        Existing measurements are updated when a matching
-        source, parameter, and timestamp already exists.
-
-        Args:
-            records:
-                Collection of MeasurementDTO objects.
-        """
+        """Persist measurements into fact_measurements."""
 
         if not records:
             return
@@ -118,7 +96,7 @@ class MeasurementRepository:
         self._conn.commit()
 
     def close(self) -> None:
-        """Close repository database connection."""
+        """Close the database connection."""
 
-        if self._conn:
+        if self._conn is not None:
             self._conn.close()

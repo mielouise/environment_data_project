@@ -1,6 +1,6 @@
 """Environmental data extraction layer.
 
-Defines the abstraction for all environmental data sources and
+Defines the abstraction for environmental data sources and
 implements the DMI Observation API client.
 """
 
@@ -32,7 +32,7 @@ class SensorDataSource(ABC):
 
     @abstractmethod
     def fetch(self) -> dict[str, Any]:
-        """Fetch data from the source.
+        """Retrieve raw data from the source.
 
         Returns:
             Raw JSON payload.
@@ -42,6 +42,8 @@ class SensorDataSource(ABC):
 
 class DMIDataSource(SensorDataSource):
     """Client for the DMI Meteorological Observation API."""
+
+    REQUEST_TIMEOUT_SECONDS = 10
 
     def __init__(
         self,
@@ -53,34 +55,35 @@ class DMIDataSource(SensorDataSource):
 
         Args:
             source_id:
-                Source identifier.
+                Unique source identifier.
 
             source_name:
                 Human-readable source name.
 
             url:
-                DMI API endpoint.
+                DMI API endpoint URL.
         """
         super().__init__(
             source_id=source_id,
             source_name=source_name
         )
+
         self.url = url
 
     def fetch(self) -> dict[str, Any]:
-        """Fetch raw observations from DMI.
+        """Retrieve observations from DMI.
 
         Returns:
-            Raw JSON response from the API.
+            Raw JSON response payload.
 
         Raises:
             RuntimeError:
-                If the HTTP request fails.
+                If the request fails.
         """
         try:
             response = requests.get(
                 self.url,
-                timeout=10
+                timeout=self.REQUEST_TIMEOUT_SECONDS
             )
 
             response.raise_for_status()

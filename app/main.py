@@ -3,11 +3,12 @@
 Starts and executes the environmental ETL pipeline.
 """
 
+import os
 import sys
 
 from app.database import (
     create_tables,
-    get_db_connection
+    get_db_connection,
 )
 from app.etl_service import ETLService
 from app.extract import DMIDataSource
@@ -16,19 +17,25 @@ from app.transform import DMIDataTransformer
 
 
 def main() -> None:
-    """Run ETL process."""
+    """Run ETL pipeline."""
 
     print(
         "=== Starting Environmental Data ETL Pipeline ==="
     )
 
+    db_connection = None
+
     try:
         create_tables()
 
-        dmi_endpoint = (
-            "https://opendataapi.dmi.dk/v2/"
-            "metObs/collections/observation/items"
+        dmi_endpoint = os.environ.get(
+            "DMI_API_URL"
         )
+
+        if not dmi_endpoint:
+            raise RuntimeError(
+                "DMI_API_URL environment variable is missing."
+            )
 
         source = DMIDataSource(
             source_id="DMI",
@@ -52,9 +59,7 @@ def main() -> None:
             repository=repository
         )
 
-        measurement_count = (
-            etl_service.run()
-        )
+        measurement_count = etl_service.run()
 
         print(
             f"Successfully processed "
@@ -73,10 +78,8 @@ def main() -> None:
         sys.exit(1)
 
     finally:
-        try:
+        if db_connection is not None:
             db_connection.close()
-        except (NameError, UnboundLocalError):
-            pass
 
 
 if __name__ == "__main__":
