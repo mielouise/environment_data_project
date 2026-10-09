@@ -37,7 +37,8 @@ def get_db_connection() -> Any:
 
 
 def create_tables() -> None:
-    """Initializes the database schema by building the required dimensional fact tables."""
+    """Initialize the database schema."""
+
     commands = (
         """
         CREATE TABLE IF NOT EXISTS dim_sources (
@@ -47,24 +48,56 @@ def create_tables() -> None:
         );
         """,
         """
+        CREATE TABLE IF NOT EXISTS dim_parameters (
+            parameter_id SERIAL PRIMARY KEY,
+            parameter_name VARCHAR(50) NOT NULL UNIQUE,
+            unit VARCHAR(20) NOT NULL
+        );
+        """,
+        """
         CREATE TABLE IF NOT EXISTS fact_measurements (
             measurement_id SERIAL PRIMARY KEY,
-            source_id VARCHAR(50) REFERENCES dim_sources(source_id),
+            source_id VARCHAR(50)
+                REFERENCES dim_sources(source_id),
+
+            parameter_id INTEGER
+                REFERENCES dim_parameters(parameter_id),
+
             timestamp TIMESTAMPTZ NOT NULL,
-            temperature NUMERIC(5, 2),
-            humidity NUMERIC(5, 2),
-            co2_ppm INT,
-            particulate_matter_pm25 NUMERIC(6, 2),
-            CONSTRAINT unique_source_timestamp UNIQUE (source_id, timestamp)
+            value NUMERIC(10, 2) NOT NULL,
+
+            CONSTRAINT unique_measurement
+                UNIQUE (
+                    source_id,
+                    parameter_id,
+                    timestamp
+                )
         );
         """
     )
-    
+
     conn = get_connection()
+
     try:
         with conn.cursor() as cursor:
             for command in commands:
                 cursor.execute(command)
+
+            cursor.execute(
+                """
+                INSERT INTO dim_parameters
+                    (parameter_name, unit)
+                VALUES
+                    ('Temperature', '°C'),
+                    ('Humidity', '%'),
+                    ('CO2', 'ppm'),
+                    ('PM2.5', 'μg/m³')
+                ON CONFLICT (parameter_name)
+                DO NOTHING;
+                """
+            )
+
         conn.commit()
+
     finally:
         conn.close()
