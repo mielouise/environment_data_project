@@ -95,4 +95,31 @@ class MeasurementRepository:
                 source_id,
                 parameter_id,
                 timestamp
-            
+            )
+            DO UPDATE SET
+                value = EXCLUDED.value;
+        """
+
+        measurement_rows = [
+            (
+                record.source_id,
+                record.parameter_id,
+                record.timestamp,
+                record.value,
+            )
+            for record in records
+        ]
+
+        with self._conn.cursor() as cursor:
+            cursor.executemany(
+                query,
+                measurement_rows,
+            )
+
+        self._conn.commit()
+
+    def close(self) -> None:
+        """Close the database connection."""
+
+        if self._conn is not None:
+            self._conn.close()

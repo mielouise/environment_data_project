@@ -39,7 +39,7 @@ class DMIDataTransformer:
     """Transform DMI observations into MeasurementDTO objects."""
 
     # Supported DMI parameters and their corresponding
-    # identifiers in the dim_parameters dimension table.
+    # identifiers in the dim_parameters table.
     PARAMETER_MAPPING: dict[str, ParameterIds] = {
         "temp_dry": ParameterIds.TEMPERATURE,
         "humidity": ParameterIds.HUMIDITY,
@@ -64,7 +64,6 @@ class DMIDataTransformer:
         self,
         raw_json: dict[str, Any]
     ) -> list[MeasurementDTO]:
-        
         """Transform raw DMI observations into DTO objects.
 
         Extracts supported environmental parameters from the
@@ -127,7 +126,7 @@ class DMIDataTransformer:
                 measurements.append(
                     MeasurementDTO(
                         source_id=self.source_id,
-                        parameter_id=int(parameter_id),
+                        parameter_id=parameter_id.value,
                         timestamp=timestamp,
                         value=float(value)
                     )
