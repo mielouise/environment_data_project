@@ -1,102 +1,102 @@
-"""Persistence layer for environmental measurements.
+"""Unit tests for the repository layer."""
 
-Implements the Repository pattern and encapsulates all database
-interaction logic for dimension tables and fact tables.
-"""
+from datetime import (
+    datetime,
+    timezone,
+)
+from unittest.mock import MagicMock
 
+from app.load import MeasurementRepository
 from app.transform import MeasurementDTO
 
 
-class MeasurementRepository:
-    """Repository responsible for persisting environmental data."""
+def test_save_source():
+    """Verify source metadata is persisted."""
 
-    def __init__(self, db_connection) -> None:
-        """Initialize repository.
+    mock_conn = MagicMock()
 
-        Args:
-            db_connection:
-                Active PostgreSQL connection instance.
-        """
-        self._conn = db_connection
+    mock_cursor = MagicMock()
 
-    def save_source(
-        self,
-        source_id: str,
-        source_name: str,
-        source_type: str
-    ) -> None:
-        """Persist source metadata into dim_sources."""
+    mock_conn.cursor.return_value.__enter__.return_value = (
+        mock_cursor
+    )
 
-        query = """
-            INSERT INTO dim_sources (
-                source_id,
-                source_name,
-                source_type
-            )
-            VALUES (%s, %s, %s)
-            ON CONFLICT (source_id)
-            DO NOTHING;
-        """
+    repository = MeasurementRepository(
+        db_connection=mock_conn
+    )
 
-        with self._conn.cursor() as cursor:
-            cursor.execute(
-                query,
-                (
-                    source_id,
-                    source_name,
-                    source_type
-                )
-            )
+    repository.save_source(
+        "SOURCE-01",
+        "Sensor Name",
+        "API_DMI"
+    )
 
-        self._conn.commit()
+    mock_cursor.execute.assert_called_once()
 
-    def save_measurements(
-        self,
-        records: list[MeasurementDTO]
-    ) -> None:
-        """Persist measurements into fact_measurements."""
+    mock_conn.commit.assert_called_once()
 
-        if not records:
-            return
 
-        query = """
-            INSERT INTO fact_measurements (
-                source_id,
-                parameter_id,
-                timestamp,
-                value
-            )
-            VALUES (%s, %s, %s, %s)
+def test_save_measurements_success():
+    """Verify measurements are converted to bulk insert rows."""
 
-            ON CONFLICT (
-                source_id,
-                parameter_id,
-                timestamp
-            )
-            DO UPDATE SET
-                value = EXCLUDED.value;
-        """
+    mock_conn = MagicMock()
 
-        measurement_rows = [
-            (
-                record.source_id,
-                record.parameter_id,
-                record.timestamp,
-                record.value
-            )
-            for record in records
-        ]
+    mock_cursor = MagicMock()
 
-        with self._conn.cursor() as cursor:
-            cursor.executemany(
-                query,
-                measurement_rows
-            )
+    mock_conn.cursor.return_value.__enter__.return_value = (
+        mock_cursor
+    )
 
-        self._conn.commit()
+    repository = MeasurementRepository(
+        db_connection=mock_conn
+    )
 
-    def close(self) -> None:
-        """Close the database connection."""
+    measurement = MeasurementDTO(
+        source_id="DMI",
+        parameter_id=1,
+        timestamp=datetime(
+            2026,
+            10,
+            5,
+            12,
+            0,
+            tzinfo=timezone.utc
+        ),
+        value=15.0
+    )
 
-        if self._conn is not None:
-            self._conn.close()
+    repository.save_measurements(
+        [measurement]
+    )
+
+    mock_cursor.executemany.assert_called_once()
+
+    mock_conn.commit.assert_called_once()
+
+
+def test_save_measurements_empty():
+    """Verify empty collections skip database work."""
+
+    mock_conn = MagicMock()
+
+    repository = MeasurementRepository(
+        db_connection=mock_conn
+    )
+
+    repository.save_measurements([])
+
+    mock_conn.cursor.assert_not_called()
+
+
+def test_close():
+    """Verify repository closes connection."""
+
+    mock_conn = MagicMock()
+
+    repository = MeasurementRepository(
+        db_connection=mock_conn
+    )
+
+    repository.close()
+
+    mock_conn.close.assert_called_once()

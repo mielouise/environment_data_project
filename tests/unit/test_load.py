@@ -1,48 +1,102 @@
-"""Unit tests for the database loading repository."""
+"""Unit tests for the repository layer."""
 
+from datetime import (
+    datetime,
+    timezone,
+)
 from unittest.mock import MagicMock
-from datetime import datetime, timezone
-from app.transform import MeasurementDTO
+
 from app.load import MeasurementRepository
+from app.transform import MeasurementDTO
 
 
-def test_measurement_repository_save_source():
-    """Verifies that save_source executes the proper SQL dimension command."""
+def test_save_source():
+    """Verify source metadata is persisted."""
+
     mock_conn = MagicMock()
+
     mock_cursor = MagicMock()
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    
-    repo = MeasurementRepository(db_connection=mock_conn)
-    repo.save_source("SOURCE-01", "Sensor Name", "HARDWARE_SENSOR")
 
-    mock_cursor.execute.assert_called_once()
-    mock_conn.commit.assert_called_once()
-
-
-def test_measurement_repository_save_measurements_success():
-    """Verifies that the repository converts DTO maps into raw bulk execute calls."""
-    mock_conn = MagicMock()
-    mock_cursor = MagicMock()
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    
-    repo = MeasurementRepository(db_connection=mock_conn)
-    test_dto = MeasurementDTO(
-        source_id="DMI-01",
-        timestamp=datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc),
-        temperature=15.0,
-        humidity=75.0
+    mock_conn.cursor.return_value.__enter__.return_value = (
+        mock_cursor
     )
 
-    repo.save_measurements([test_dto])
+    repository = MeasurementRepository(
+        db_connection=mock_conn
+    )
 
-    mock_cursor.executemany.assert_called_once()
+    repository.save_source(
+        "SOURCE-01",
+        "Sensor Name",
+        "API_DMI"
+    )
+
+    mock_cursor.execute.assert_called_once()
+
     mock_conn.commit.assert_called_once()
 
 
-def test_measurement_repository_save_measurements_empty():
-    """Verifies that save_measurements exits early when given an empty collection."""
+def test_save_measurements_success():
+    """Verify measurements are converted to bulk insert rows."""
+
     mock_conn = MagicMock()
-    repo = MeasurementRepository(db_connection=mock_conn)
-    
-    repo.save_measurements([])
+
+    mock_cursor = MagicMock()
+
+    mock_conn.cursor.return_value.__enter__.return_value = (
+        mock_cursor
+    )
+
+    repository = MeasurementRepository(
+        db_connection=mock_conn
+    )
+
+    measurement = MeasurementDTO(
+        source_id="DMI",
+        parameter_id=1,
+        timestamp=datetime(
+            2026,
+            10,
+            5,
+            12,
+            0,
+            tzinfo=timezone.utc
+        ),
+        value=15.0
+    )
+
+    repository.save_measurements(
+        [measurement]
+    )
+
+    mock_cursor.executemany.assert_called_once()
+
+    mock_conn.commit.assert_called_once()
+
+
+def test_save_measurements_empty():
+    """Verify empty collections skip database work."""
+
+    mock_conn = MagicMock()
+
+    repository = MeasurementRepository(
+        db_connection=mock_conn
+    )
+
+    repository.save_measurements([])
+
     mock_conn.cursor.assert_not_called()
+
+
+def test_close():
+    """Verify repository closes connection."""
+
+    mock_conn = MagicMock()
+
+    repository = MeasurementRepository(
+        db_connection=mock_conn
+    )
+
+    repository.close()
+
+    mock_conn.close.assert_called_once()

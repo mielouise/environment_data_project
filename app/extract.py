@@ -1,96 +1,84 @@
-"""Environmental data extraction layer.
+"""Unit tests for extraction layer."""
 
-Defines the abstraction for environmental data sources and
-implements the DMI Observation API client.
-"""
+from unittest.mock import MagicMock, patch
 
-from abc import ABC, abstractmethod
-from typing import Any
+import pytest
+from requests import RequestException
 
-import requests
+from app.extract import DMIDataSource
 
 
-class SensorDataSource(ABC):
-    """Abstract base class for environmental data sources."""
+@patch("app.extract.requests.get")
+def test_dmi_data_source_fetch_success(
+    mock_get
+):
+    """Verify successful API calls return JSON."""
 
-    def __init__(
-        self,
-        source_id: str,
-        source_name: str
-    ) -> None:
-        """Initialize the data source.
+    mock_response = MagicMock()
 
-        Args:
-            source_id:
-                Unique source identifier.
+    mock_response.json.return_value = {
+        "features": [
+            {
+                "properties": {
+                    "value": 21.5
+                }
+            }
+        ]
+    }
 
-            source_name:
-                Human-readable source name.
-        """
-        self.source_id = source_id
-        self.source_name = source_name
+    mock_get.return_value = mock_response
 
-    @abstractmethod
-    def fetch(self) -> dict[str, Any]:
-        """Retrieve raw data from the source.
+    source = DMIDataSource(
+        source_id="TEST-01",
+        source_name="Test Station",
+        url="http://fake-url.com"
+    )
 
-        Returns:
-            Raw JSON payload.
-        """
-        raise NotImplementedError
+    result = source.fetch()
+
+    assert result == {
+        "features": [
+            {
+                "properties": {
+                    "value": 21.5
+                }
+            }
+        ]
+    }
+
+    mock_get.assert_called_once_with(
+        "http://fake-url.com",
+        timeout=10
+    )
 
 
-class DMIDataSource(SensorDataSource):
-    """Client for the DMI Meteorological Observation API."""
+@patch("app.extract.requests.get")
+def test_dmi_data_source_fetch_failure(
+    mock_get
+):
+    """Verify API failures raise RuntimeError."""
 
-    REQUEST_TIMEOUT_SECONDS = 10
+    underlying_error = RequestException(
+        "Network broken"
+    )
 
-    def __init__(
-        self,
-        source_id: str,
-        source_name: str,
-        url: str
-    ) -> None:
-        """Initialize DMI data source.
+    mock_get.side_effect = underlying_error
 
-        Args:
-            source_id:
-                Unique source identifier.
+    source = DMIDataSource(
+        source_id="TEST-01",
+        source_name="Test Station",
+        url="http://fake-url.com"
+    )
 
-            source_name:
-                Human-readable source name.
+    with pytest.raises(RuntimeError) as exc_info:
+        source.fetch()
 
-            url:
-                DMI API endpoint URL.
-        """
-        super().__init__(
-            source_id=source_id,
-            source_name=source_name
-        )
+    assert (
+        "Failed to retrieve DMI data"
+        in str(exc_info.value)
+    )
 
-        self.url = url
-
-    def fetch(self) -> dict[str, Any]:
-        """Retrieve observations from DMI.
-
-        Returns:
-            Raw JSON response payload.
-
-        Raises:
-            RuntimeError:
-                If the request fails.
-        """
-        try:
-            response = requests.get(
-                self.url,
-                timeout=self.REQUEST_TIMEOUT_SECONDS
-            )
-
-            response.raise_for_status()
-
-            return response.json()
-
-        except requests.RequestException as err:
-            raise RuntimeError(
-                f"Failed to retrieve DMI data: {err}"
-            ) from err
+    assert (
+        exc_info.value.__cause__
+        == underlying_error
+    )
