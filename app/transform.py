@@ -63,7 +63,9 @@ class DMIDataTransformer:
     def transform(
         self,
         raw_json: dict[str, Any]
-    ) -> list"""Transform raw DMI observations into DTO objects.
+    ) -> list[MeasurementDTO]:
+        
+        """Transform raw DMI observations into DTO objects.
 
         Extracts supported environmental parameters from the
         DMI API response and converts them into normalized
@@ -83,7 +85,6 @@ class DMIDataTransformer:
         features = raw_json.get("features", [])
 
         for feature in features:
-
             properties = feature.get(
                 "properties",
                 {}
