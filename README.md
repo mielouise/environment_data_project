@@ -78,6 +78,19 @@ docker compose down
 The PostgreSQL data volume is retained when the containers are stopped this
 way.
 
+### Testing
+
+Run the complete test suite, including the unit tests and integration tests:
+
+```bash
+docker compose run --build --rm tests
+```
+
+The test service waits for PostgreSQL to become healthy. Integration tests
+connect to the configured PostgreSQL database and make a real request to the
+DMI API, so the corresponding environment variables must be configured and
+the environment must have network access to DMI.
+
 ---
 
 ## Project Structure
@@ -479,21 +492,6 @@ erDiagram
 - A source and a parameter can each be referenced by multiple measurements.
 - Separating measurements from descriptive metadata supports consistent
   storage and analysis across sources and parameters.
-
----
-
-## Testing
-
-Run the complete test suite, including the unit tests and integration tests:
-
-```bash
-docker compose run --build --rm tests
-```
-
-The test service waits for PostgreSQL to become healthy. Integration tests
-connect to the configured PostgreSQL database and make a real request to the
-DMI API, so the corresponding environment variables must be configured and
-the environment must have network access to DMI.
 
 ---
 
