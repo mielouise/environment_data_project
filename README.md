@@ -31,6 +31,143 @@ This project demonstrates database integration, API consumption, containerized d
 
 ---
 
+## Getting Started
+
+### Prerequisites
+
+- Git
+- Docker Desktop with Docker Compose
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/mielouise/environment_data_project.git
+cd environment_data_project
+```
+
+### Start the application
+
+```bash
+docker compose up --build app
+```
+
+This builds and starts the application together with its PostgreSQL
+dependency. The application initializes the database schema and runs the ETL
+workflow: it requests observations from the DMI API, transforms them, and
+saves the source and measurements to PostgreSQL.
+
+To start PostgreSQL and pgAdmin for database inspection:
+```bash
+docker compose up -d db pgadmin
+```
+
+Open pgAdmin at:
+
+```text
+http://localhost:8080
+```
+
+Sign in with the pgAdmin credentials configured in `.env`.
+
+When finished, stop and remove the containers with:
+
+```bash
+docker compose down
+```
+
+The PostgreSQL data volume is retained when the containers are stopped this
+way.
+
+---
+
+## Project Structure
+
+```text
+environment_data_project/
+├── .devcontainer/
+│   ├── Dockerfile
+│   ├── devcontainer-lock.json
+│   └── devcontainer.json
+├── app/
+│   ├── __init__.py
+│   ├── constants/
+│   │   ├── __init__.py
+│   │   └── parameters.py
+│   ├── extract/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   └── dmi.py
+│   ├── database.py
+│   ├── migrations/
+│   │   └── 0001_initial_schema.sql
+│   ├── etl_service.py
+│   ├── load.py
+│   ├── main.py
+│   └── transform.py
+├── pgadmin/
+│   └── servers.json
+├── tests/
+│   ├── __init__.py
+│   ├── integration/
+│   │   ├── __init__.py
+│   │   ├── test_dmi_api.py
+│   │   └── test_postgres.py
+│   └── unit/
+│       ├── __init__.py
+│       ├── test_database.py
+│       ├── test_etl_service.py
+│       ├── test_extract.py
+│       ├── test_load.py
+│       ├── test_main.py
+│       └── test_transform.py
+├── .dockerignore
+├── .gitignore
+├── Dockerfile
+├── docker-compose.yml
+├── requirements-dev.txt
+├── requirements.txt
+└── README.md
+```
+
+## File overview
+
+- The `app` directory contains the application code. Docker starts the
+  application through `app/main.py`, which orchestrates the ETL process. This
+  file is therefore the recommended application entry point.
+- The `app/extract` directory contains the code for retrieving data from the
+  DMI API, including a shared abstraction for data sources.
+- The `app/constants` directory contains shared constants, including IDs for
+  the supported measurement parameters.
+- The `app/migrations` directory contains versioned SQL scripts for creating
+  and updating the database schema.
+- `app/transform.py`, `app/load.py`, `app/database.py`, and
+  `app/etl_service.py` handle data transformation, data storage, database
+  connections, and orchestration of the ETL process, respectively.
+- The `tests` directory contains the test suite, which is run by the `tests`
+  service in Docker Compose. It is divided into two subdirectories:
+  - The `tests/unit` directory contains unit tests that test application code
+    in isolation from external systems, for example by using mocks.
+  - The `tests/integration` directory contains integration tests that verify
+    connections to external systems. `test_postgres.py` tests the connection
+    to PostgreSQL, and `test_dmi_api.py` sends a request to the configured DMI
+    API.
+- `Dockerfile` defines the Docker image for the application and tests.
+  `docker-compose.yml` configures the app, test, PostgreSQL, and pgAdmin
+  services.
+- `.gitignore` specifies which files Git should ignore, such as local
+  environment settings. `.dockerignore` specifies which files to exclude from
+  the Docker build context.
+- `requirements.txt` lists the Python packages required by the application.
+  `requirements-dev.txt` includes these packages along with additional
+  packages needed for development and testing.
+- The `.devcontainer` directory contains the development container
+  configuration, and the `pgadmin` directory contains the pgAdmin
+  configuration.
+- `README.md` contains the project description, setup instructions, and
+  database schema documentation.
+
+---
+
 ## Architecture
 
 The diagrams below describe the solution from four different
@@ -48,7 +185,6 @@ execution, and database levels.
 
 - Shows the main application components and their responsibilities.
 - Shows how the application communicates with the DMI API and PostgreSQL.
-- Rendered as a Mermaid flowchart with UML component labels.
 
 ```mermaid
 flowchart LR
@@ -158,12 +294,13 @@ classDiagram
 ### ETL workflow
 
 The single activity diagram below shows the complete application run, including
-the main ETL path, decision points, error handling, and connection cleanup.
+database migrations before the ETL path, decision points, error handling, and
+connection cleanup.
 
 ```mermaid
 flowchart TD
     Start((Start))
-    InitSchema["1. Initialize database schema"]
+    InitSchema["1. Apply pending database migrations"]
     ReadURL["2. Read DMI_API_URL"]
     HasURL{"API URL configured?"}
     BuildServices["3. Create data source, transformer,<br/>database connection, repository,<br/>and ETL service"]
@@ -211,6 +348,40 @@ flowchart TD
     class ReportSuccess success
     class ReportFailure failure
 ```
+
+The workflow proceeds as follows:
+
+1. Apply pending database migrations to create or update the database schema.
+2. Read the `DMI_API_URL` setting.
+3. If the URL is configured, create the data source, transformer, database
+   connection, repository, and ETL service.
+4. Fetch observations from the DMI API and transform supported observations
+   into measurement records.
+5. Save the DMI source metadata, then insert or update the measurement records
+   in PostgreSQL when any are available.
+6. Report the number of processed measurements and close the database
+   connection.
+7. If setup or processing fails, report the error and close the database
+   connection if one was opened.
+
+#### Database Migrations
+
+The application applies pending SQL migrations automatically before starting
+the ETL workflow. Migration scripts live in `app/migrations/` and are named
+with a unique, increasing version and a descriptive name, for example
+`0001_initial_schema.sql`. Applied versions and SHA-256 checksums are stored
+in the PostgreSQL `schema_migrations` table. Migrations run in a transaction,
+and a database advisory lock prevents concurrent application instances from
+applying the same migration simultaneously.
+
+The initial migration creates the current schema using idempotent statements,
+so an existing database created by an earlier version of this project can
+adopt migration tracking without dropping its tables or measurement data.
+
+After a migration has been committed, do not edit or rename it. To change the
+schema, add a new migration file with the next version, such as
+`0002_add_station_metadata.sql`. This preserves a consistent upgrade path for
+existing installations.
 
 ### Database Design
 
@@ -267,26 +438,7 @@ The schema also includes a unique constraint on:
 (source_id, parameter_id, timestamp)
 ```
 
-### Database migrations
-
-The application applies pending SQL migrations automatically before starting
-the ETL workflow. Migration scripts live in `app/migrations/` and are named
-with a unique, increasing version and a descriptive name, for example
-`0001_initial_schema.sql`. Applied versions and SHA-256 checksums are stored
-in the PostgreSQL `schema_migrations` table. Migrations run in a transaction,
-and a database advisory lock prevents concurrent application instances from
-applying the same migration simultaneously.
-
-The initial migration creates the current schema using idempotent statements,
-so an existing database created by an earlier version of this project can
-adopt migration tracking without dropping its tables or measurement data.
-
-After a migration has been committed, do not edit or rename it. To change the
-schema, add a new migration file with the next version, such as
-`0002_add_station_metadata.sql`. This preserves a consistent upgrade path for
-existing installations.
-
-### Database ER diagram
+#### Entity Relationship Diagram
 
 The ER diagram describes the PostgreSQL data model and the relationships
 between its tables.
@@ -330,118 +482,7 @@ erDiagram
 
 ---
 
-## Project Structure
-
-```text
-environment_data_project/
-├── .devcontainer/
-│   ├── Dockerfile
-│   ├── devcontainer-lock.json
-│   └── devcontainer.json
-├── app/
-│   ├── __init__.py
-│   ├── constants/
-│   │   ├── __init__.py
-│   │   └── parameters.py
-│   ├── extract/
-│   │   ├── __init__.py
-│   │   ├── base.py
-│   │   └── dmi.py
-│   ├── database.py
-│   ├── migrations/
-│   │   └── 0001_initial_schema.sql
-│   ├── etl_service.py
-│   ├── load.py
-│   ├── main.py
-│   └── transform.py
-├── pgadmin/
-│   └── servers.json
-├── tests/
-│   ├── __init__.py
-│   ├── integration/
-│   │   ├── __init__.py
-│   │   ├── test_dmi_api.py
-│   │   └── test_postgres.py
-│   └── unit/
-│       ├── __init__.py
-│       ├── test_database.py
-│       ├── test_etl_service.py
-│       ├── test_extract.py
-│       ├── test_load.py
-│       ├── test_main.py
-│       └── test_transform.py
-├── .dockerignore
-├── .gitignore
-├── Dockerfile
-├── docker-compose.yml
-├── requirements-dev.txt
-├── requirements.txt
-└── README.md
-```
-
-## File overview
-
-- The `app` directory contains the application code. Docker starts the
-  application through `app/main.py`, which orchestrates the ETL process. This
-  file is therefore the recommended application entry point.
-- The `app/extract` directory contains the code for retrieving data from the
-  DMI API, including a shared abstraction for data sources.
-- The `app/constants` directory contains shared constants, including IDs for
-  the supported measurement parameters.
-- `app/transform.py`, `app/load.py`, `app/database.py`, and
-  `app/etl_service.py` handle data transformation, data storage, database
-  connections, and orchestration of the ETL process, respectively.
-- The `tests` directory contains the test suite, which is run by the `tests`
-  service in Docker Compose. It is divided into two subdirectories:
-  - The `tests/unit` directory contains unit tests that test application code
-    in isolation from external systems, for example by using mocks.
-  - The `tests/integration` directory contains integration tests that verify
-    connections to external systems. `test_postgres.py` tests the connection
-    to PostgreSQL, and `test_dmi_api.py` sends a request to the configured DMI
-    API.
-- `Dockerfile` defines the Docker image for the application and tests.
-  `docker-compose.yml` configures the app, test, PostgreSQL, and pgAdmin
-  services.
-- `.gitignore` specifies which files Git should ignore, such as local
-  environment settings. `.dockerignore` specifies which files to exclude from
-  the Docker build context.
-- `requirements.txt` lists the Python packages required by the application.
-  `requirements-dev.txt` includes these packages along with additional
-  packages needed for development and testing.
-- The `.devcontainer` directory contains the development container
-  configuration, and the `pgadmin` directory contains the pgAdmin
-  configuration.
-- `README.md` contains the project description, setup instructions, and
-  database schema documentation.
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- Git
-- Docker Desktop with Docker Compose
-
-### Clone the Repository
-
-```bash
-git clone https://github.com/mielouise/environment_data_project.git
-cd environment_data_project
-```
-
-### Start the application
-
-```bash
-docker compose up --build app
-```
-
-This builds and starts the application together with its PostgreSQL
-dependency. The application initializes the database schema and runs the ETL
-workflow: it requests observations from the DMI API, transforms them, and
-saves the source and measurements to PostgreSQL.
-
-### Run the tests
+## Testing
 
 Run the complete test suite, including the unit tests and integration tests:
 
@@ -453,38 +494,6 @@ The test service waits for PostgreSQL to become healthy. Integration tests
 connect to the configured PostgreSQL database and make a real request to the
 DMI API, so the corresponding environment variables must be configured and
 the environment must have network access to DMI.
-
-To start PostgreSQL and pgAdmin for database inspection:
-```bash
-docker compose up -d db pgadmin
-```
-
-Open pgAdmin at:
-
-```text
-http://localhost:8080
-```
-
-Sign in with the pgAdmin credentials configured in `.env`.
-
-When finished, stop and remove the containers with:
-
-```bash
-docker compose down
-```
-
-The PostgreSQL data volume is retained when the containers are stopped this
-way.
-
----
-
-
-## ETL Workflow
-
-1. Extract data from the DMI API.
-2. Transform the data into the required database format.
-3. Load the processed data into PostgreSQL.
-4. Validate functionality through automated tests.
 
 ---
 
