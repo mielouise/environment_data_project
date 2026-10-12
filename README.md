@@ -333,12 +333,6 @@ connect to the configured PostgreSQL database and make a real request to the
 DMI API, so the corresponding environment variables must be configured and
 the environment must have network access to DMI.
 
-To run only the unit tests:
-
-```bash
-docker compose run --build --rm tests pytest tests/unit
-```
-
 To start PostgreSQL and pgAdmin for database inspection:
 ```bash
 docker compose up -d db pgadmin
