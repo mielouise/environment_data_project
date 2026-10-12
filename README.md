@@ -33,42 +33,32 @@ This project demonstrates database integration, API consumption, containerized d
 
 ## Architecture
 
-The application runs as a Docker Compose service and processes environmental
-observations through an extract, transform, and load (ETL) pipeline. The
-PostgreSQL database stores source metadata and measurements. pgAdmin provides a
-web interface for database administration, while the test service runs unit
-and integration tests.
+The application processes environmental observations through an extract,
+transform, and load (ETL) pipeline. Its modules retrieve data from the DMI API,
+transform it, and store it in PostgreSQL. The diagram focuses on the
+application's software components and their interactions with external
+systems; deployment and development tools are not shown.
 
 ```mermaid
 flowchart LR
-    DMI[DMI Observation API]
-
-    subgraph Compose[Docker Compose]
-        App[Application container]
-        Tests["Test container<br/>Pytest: unit and integration"]
-        DB[(PostgreSQL database)]
-        Volume[(Persistent database volume)]
-        PgAdmin[pgAdmin]
-    end
-
-    subgraph Pipeline[ETL pipeline in app/main.py]
+    subgraph Application[Application]
+        Main[app/main.py]
         ETL[ETLService]
         Extract[DMIDataSource]
         Transform[DMIDataTransformer]
         Load[MeasurementRepository]
 
+        Main --> ETL
         ETL --> Extract
         Extract --> Transform
         Transform --> Load
     end
 
-    App --> ETL
+    DMI[DMI Observation API]
+    DB[(PostgreSQL database)]
+
     Extract <-->|HTTP: observations| DMI
     Load -->|Save source and measurements| DB
-    DB --- Volume
-    PgAdmin -->|Manage and inspect| DB
-    Tests -->|Integration tests| DB
-    Tests -->|Integration tests| DMI
 ```
 
 The following UML class diagram shows the main software components and their
