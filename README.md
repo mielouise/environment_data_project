@@ -101,6 +101,36 @@ Login using the credentials defined in the `.env` file.
 
 ---
 
+## Database Schema
+
+```mermaid
+erDiagram
+    DIM_SOURCES ||--o{ FACT_MEASUREMENTS : records
+    DIM_PARAMETERS ||--o{ FACT_MEASUREMENTS : classifies
+
+    DIM_SOURCES {
+        VARCHAR source_id PK "Unique source identifier"
+        VARCHAR source_name "Source name"
+        VARCHAR source_type "API, Sensor etc."
+    }
+
+    DIM_PARAMETERS {
+        INTEGER parameter_id PK "Parameter identifier"
+        VARCHAR parameter_name "Temperature, Humidity, CO2..."
+        VARCHAR unit "Measurement unit"
+    }
+
+    FACT_MEASUREMENTS {
+        SERIAL measurement_id PK "Measurement identifier"
+        VARCHAR source_id FK "References DIM_SOURCES"
+        INTEGER parameter_id FK "References DIM_PARAMETERS"
+        TIMESTAMPTZ timestamp "Observation time"
+        NUMERIC value "Measurement value"
+    }
+```
+
+---
+
 ## Learning Objectives
 
 This project was developed to demonstrate:
