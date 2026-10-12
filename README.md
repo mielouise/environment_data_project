@@ -31,6 +31,76 @@ This project demonstrates database integration, API consumption, containerized d
 
 ---
 
+## Architecture
+
+The application runs as a Docker Compose service and processes environmental
+observations through an extract, transform, and load (ETL) pipeline. The
+PostgreSQL database stores source metadata and measurements. pgAdmin provides a
+web interface for database administration, while the test service runs unit
+and integration tests.
+
+```mermaid
+flowchart LR
+    DMI[DMI Observation API]
+
+    subgraph Compose[Docker Compose]
+        App[Application container]
+        Tests["Test container<br/>Pytest: unit and integration"]
+        DB[(PostgreSQL database)]
+        Volume[(Persistent database volume)]
+        PgAdmin[pgAdmin]
+    end
+
+    subgraph Pipeline[ETL pipeline in app/main.py]
+        ETL[ETLService]
+        Extract[DMIDataSource]
+        Transform[DMIDataTransformer]
+        Load[MeasurementRepository]
+
+        ETL --> Extract
+        Extract --> Transform
+        Transform --> Load
+    end
+
+    App --> ETL
+    Extract <-->|HTTP: observations| DMI
+    Load -->|Save source and measurements| DB
+    DB --- Volume
+    PgAdmin -->|Manage and inspect| DB
+    Tests -->|Integration tests| DB
+    Tests -->|Integration tests| DMI
+```
+
+The following UML class diagram shows the main software components and their
+dependencies. The stereotypes identify each component's role in the
+architecture.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class Main <<entry point>>
+    class ETLService <<orchestrator>>
+    class SensorDataSource <<interface>>
+    class DMIDataSource <<component>>
+    class DMI_API <<external system>>
+    class DMIDataTransformer <<component>>
+    class MeasurementDTO <<data object>>
+    class MeasurementRepository <<component>>
+    class PostgreSQL <<external database>>
+
+    Main ..> ETLService : creates and runs
+    ETLService --> SensorDataSource : fetches data from
+    DMIDataSource ..|> SensorDataSource : implements
+    DMIDataSource --> DMI_API : HTTP request
+    ETLService --> DMIDataTransformer : transforms response
+    DMIDataTransformer ..> MeasurementDTO : creates
+    ETLService --> MeasurementRepository : persists results
+    MeasurementRepository --> PostgreSQL : executes SQL
+```
+
+---
+
 ## Project Structure
 
 ```text
@@ -119,8 +189,8 @@ environment_data_project/
 
 ### Prerequisites
 
-- Docker Desktop
 - Git
+- Docker Desktop with Docker Compose
 
 ### Clone the Repository
 
@@ -129,35 +199,85 @@ git clone https://github.com/mielouise/environment_data_project.git
 cd environment_data_project
 ```
 
-### Start the Application
+### Configure environment variables
+
+Docker Compose reads configuration from a `.env` file in the project root.
+Create the file locally (do not commit it) and provide values for the following
+variables:
+
+- `POSTGRES_HOST` — use `db` when connecting from a Docker Compose service.
+- `POSTGRES_PORT` — PostgreSQL port, normally `5432`.
+- `POSTGRES_DB` — database name.
+- `POSTGRES_USER` and `POSTGRES_PASSWORD` — database credentials.
+- `DMI_API_URL` — URL of the DMI Observation API endpoint to request.
+- `PGADMIN_USER_EMAIL` and `PGADMIN_PASSWORD` — pgAdmin login credentials.
+
+Use appropriate credentials for your environment. The database and pgAdmin
+variables are passed to their respective services by `docker-compose.yml`.
+
+### Build the Docker image
+
+Build the application and test images from the project root:
 
 ```bash
-docker compose up --build app
+docker compose build app tests
 ```
 
-## Running Tests
+Docker Compose builds the PostgreSQL and pgAdmin images from their configured
+upstream images when those services are started.
 
-The test suite includes integration tests that connect to PostgreSQL and the
-DMI API. Ensure the database settings and `DMI_API_URL` are configured in
-`.env`, and that the test environment can reach the DMI API.
+### Run the tests
+
+Run the complete test suite, including the unit tests and integration tests:
 
 ```bash
 docker compose run --build --rm tests
 ```
 
-### Access pgAdmin
+The test service waits for PostgreSQL to become healthy. Integration tests
+connect to the configured PostgreSQL database and make a real request to the
+DMI API, so the corresponding environment variables must be configured and
+the environment must have network access to DMI.
+
+To run only the unit tests:
 
 ```bash
-docker compose up -d pgadmin
+docker compose run --build --rm tests pytest tests/unit
 ```
 
-Open:
+### Run the application
+
+Start the application and its PostgreSQL dependency:
+
+```bash
+docker compose up --build app
+```
+
+The application initializes the database schema and then runs the ETL workflow:
+it requests observations from the DMI API, transforms them, and saves the
+source and measurements to PostgreSQL.
+
+To start PostgreSQL and pgAdmin for database inspection:
+```bash
+docker compose up -d db pgadmin
+```
+
+Open pgAdmin at:
 
 ```text
 http://localhost:8080
 ```
 
-Login using the credentials defined in the `.env` file.
+Sign in with the pgAdmin credentials configured in `.env`.
+
+When finished, stop and remove the containers with:
+
+```bash
+docker compose down
+```
+
+The PostgreSQL data volume is retained when the containers are stopped this
+way.
 
 ---
 
