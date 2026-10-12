@@ -33,59 +33,180 @@ This project demonstrates database integration, API consumption, containerized d
 
 ## Architecture
 
-The application processes environmental observations through an extract,
-transform, and load (ETL) pipeline. Its modules retrieve data from the DMI API,
-transform it, and store it in PostgreSQL. The diagram focuses on the
-application's software components and their interactions with external
-systems; deployment and development tools are not shown.
+The application retrieves environmental observations from the DMI API,
+transforms supported observations into measurement records, and persists them
+in PostgreSQL. The diagrams below show the architecture from three different
+perspectives: an application component overview, the UML class structure, and
+the runtime ETL workflow. Docker, Docker Compose, pgAdmin, and the test runner
+are intentionally excluded because they are development or operational tools
+rather than application components.
+
+### Application component overview
+
+- Shows the main application components and their responsibilities.
+- Shows how the application communicates with the DMI API and PostgreSQL.
+- Rendered as a Mermaid flowchart with UML component labels.
 
 ```mermaid
 flowchart LR
-    subgraph Application[Application]
-        Main[app/main.py]
-        ETL[ETLService]
-        Extract[DMIDataSource]
-        Transform[DMIDataTransformer]
-        Load[MeasurementRepository]
-
-        Main --> ETL
-        ETL --> Extract
-        Extract --> Transform
-        Transform --> Load
+    subgraph Application["Application"]
+        direction TB
+        Main["«component»<br/>Application entry point<br/>app/main.py"]
+        ETL["«component»<br/>ETL orchestrator<br/>ETLService"]
+        Source["«component»<br/>DMI data source<br/>DMIDataSource"]
+        Transformer["«component»<br/>Data transformer<br/>DMIDataTransformer"]
+        Repository["«component»<br/>Measurement repository<br/>MeasurementRepository"]
+        Database["«component»<br/>Database utilities<br/>app/database.py"]
     end
 
-    DMI[DMI Observation API]
-    DB[(PostgreSQL database)]
+    DMI["«external system»<br/>DMI Observation API"]
+    PostgreSQL[("«database»<br/>PostgreSQL")]
 
-    Extract <-->|HTTP: observations| DMI
-    Load -->|Save source and measurements| DB
+    Main -.->|creates and runs| ETL
+    ETL -.->|uses| Source
+    ETL -.->|uses| Transformer
+    ETL -.->|uses| Repository
+    Source <-->|HTTP observations| DMI
+    Main -.->|initializes schema and opens connection| Database
+    Database -->|schema and connection| PostgreSQL
+    Repository -->|SQL operations| PostgreSQL
+
+    classDef application fill:#eff6ff,stroke:#2563eb,color:#0f172a,stroke-width:1.5px
+    classDef external fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-width:1.5px
+    classDef datastore fill:#ecfdf5,stroke:#059669,color:#064e3b,stroke-width:1.5px
+
+    class Main,ETL,Source,Transformer,Repository,Database application
+    class DMI external
+    class PostgreSQL datastore
 ```
 
-The following UML class diagram shows the main software components and their
-dependencies.
+### UML class diagram
+
+- Shows the static structure of the main ETL classes, including their key
+  attributes and methods.
+- The solid inheritance arrow shows that `DMIDataSource` extends
+  `SensorDataSource`.
+- The solid associations show which data source, transformer, and repository
+  `ETLService` uses.
+- The dashed dependencies show that the transformer creates `MeasurementDTO`
+  objects and uses `ParameterIds`, while the repository persists the DTOs.
 
 ```mermaid
 classDiagram
     direction LR
 
-    class Main
-    class ETLService
-    class SensorDataSource
-    class DMIDataSource
-    class DMIObservationAPI
-    class DMIDataTransformer
-    class MeasurementDTO
-    class MeasurementRepository
-    class PostgreSQL
+    class SensorDataSource {
+        <<abstract>>
+        +source_id: str
+        +source_name: str
+        +fetch() dict
+    }
 
-    Main ..> ETLService : creates and runs
-    ETLService --> SensorDataSource : fetches data from
-    DMIDataSource ..|> SensorDataSource : implements
-    DMIDataSource --> DMIObservationAPI : requests observations
-    ETLService --> DMIDataTransformer : transforms response
+    class DMIDataSource {
+        +url: str
+        +fetch() dict
+    }
+
+    class ETLService {
+        -source: SensorDataSource
+        -transformer: DMIDataTransformer
+        -repository: MeasurementRepository
+        +run() int
+    }
+
+    class DMIDataTransformer {
+        -source_id: str
+        +transform(raw_json) list~MeasurementDTO~
+    }
+
+    class MeasurementDTO {
+        +source_id: str
+        +parameter_id: int
+        +timestamp: datetime
+        +value: float
+    }
+
+    class MeasurementRepository {
+        -_conn
+        +save_source(source_id, source_name, source_type) None
+        +save_measurements(records) None
+        +close() None
+    }
+
+    class ParameterIds {
+        <<enumeration>>
+        TEMPERATURE
+        HUMIDITY
+        HUMIDITY_PAST_1H
+        CO2
+        PM25
+    }
+
+    SensorDataSource <|-- DMIDataSource
+
+    ETLService --> SensorDataSource : uses
+    ETLService --> DMIDataTransformer : uses
+    ETLService --> MeasurementRepository : uses
     DMIDataTransformer ..> MeasurementDTO : creates
-    ETLService --> MeasurementRepository : persists results
-    MeasurementRepository --> PostgreSQL : executes SQL
+    DMIDataTransformer ..> ParameterIds : maps parameter IDs
+    MeasurementRepository ..> MeasurementDTO : persists
+```
+
+### ETL workflow
+
+The single activity diagram below shows the complete application run, including
+the main ETL path, decision points, error handling, and connection cleanup.
+
+```mermaid
+flowchart TD
+    Start((Start))
+    InitSchema["1. Initialize database schema"]
+    ReadURL["2. Read DMI_API_URL"]
+    HasURL{"API URL configured?"}
+    BuildServices["3. Create data source, transformer,<br/>database connection, repository,<br/>and ETL service"]
+    Fetch["4. Fetch observations from DMI API"]
+    Transform["5. Transform supported observations<br/>into MeasurementDTO records"]
+    SaveSource["6. Save DMI source metadata"]
+    SaveMeasurements["7. Call save_measurements(records)"]
+    HasRecords{"Any measurements?"}
+    WriteRecords["Insert or update measurements<br/>in PostgreSQL"]
+    NoRecords["No database writes required"]
+    Count["Return processed measurement count"]
+    ReportSuccess["Report successful completion"]
+    ReportFailure["Log error and exit<br/>with failure status"]
+    Cleanup["Close application database connection<br/>if one was opened"]
+    End((End))
+
+    Start --> InitSchema --> ReadURL --> HasURL
+    HasURL -->|Yes| BuildServices --> Fetch
+    Transform --> SaveSource
+    Fetch --> Transform
+    SaveSource --> SaveMeasurements --> HasRecords
+    HasRecords -->|Yes| WriteRecords --> Count
+    HasRecords -->|No| NoRecords --> Count
+    Count --> ReportSuccess --> Cleanup --> End
+    HasURL -->|No| ReportFailure
+    ReportFailure --> Cleanup
+
+    InitSchema -. error .-> ReportFailure
+    BuildServices -. error .-> ReportFailure
+    Fetch -. error .-> ReportFailure
+    Transform -. error .-> ReportFailure
+    SaveSource -. error .-> ReportFailure
+    SaveMeasurements -. error .-> ReportFailure
+    WriteRecords -. error .-> ReportFailure
+
+    classDef terminal fill:#0f766e,color:#ffffff,stroke:#115e59,stroke-width:2px
+    classDef action fill:#eff6ff,color:#0f172a,stroke:#2563eb,stroke-width:1.5px
+    classDef decision fill:#fff7ed,color:#0f172a,stroke:#ea580c,stroke-width:1.5px
+    classDef success fill:#dcfce7,color:#14532d,stroke:#16a34a,stroke-width:1.5px
+    classDef failure fill:#fee2e2,color:#7f1d1d,stroke:#dc2626,stroke-width:1.5px
+
+    class Start,End terminal
+    class InitSchema,ReadURL,BuildServices,Fetch,Transform,SaveSource,SaveMeasurements,WriteRecords,NoRecords,Count,Cleanup action
+    class HasURL,HasRecords decision
+    class ReportSuccess success
+    class ReportFailure failure
 ```
 
 ---
@@ -188,32 +309,16 @@ git clone https://github.com/mielouise/environment_data_project.git
 cd environment_data_project
 ```
 
-### Configure environment variables
-
-Docker Compose reads configuration from a `.env` file in the project root.
-Create the file locally (do not commit it) and provide values for the following
-variables:
-
-- `POSTGRES_HOST` — use `db` when connecting from a Docker Compose service.
-- `POSTGRES_PORT` — PostgreSQL port, normally `5432`.
-- `POSTGRES_DB` — database name.
-- `POSTGRES_USER` and `POSTGRES_PASSWORD` — database credentials.
-- `DMI_API_URL` — URL of the DMI Observation API endpoint to request.
-- `PGADMIN_USER_EMAIL` and `PGADMIN_PASSWORD` — pgAdmin login credentials.
-
-Use appropriate credentials for your environment. The database and pgAdmin
-variables are passed to their respective services by `docker-compose.yml`.
-
-### Build the Docker image
-
-Build the application and test images from the project root:
+### Start the application
 
 ```bash
-docker compose build app tests
+docker compose up --build app
 ```
 
-Docker Compose builds the PostgreSQL and pgAdmin images from their configured
-upstream images when those services are started.
+This builds and starts the application together with its PostgreSQL
+dependency. The application initializes the database schema and runs the ETL
+workflow: it requests observations from the DMI API, transforms them, and
+saves the source and measurements to PostgreSQL.
 
 ### Run the tests
 
@@ -233,18 +338,6 @@ To run only the unit tests:
 ```bash
 docker compose run --build --rm tests pytest tests/unit
 ```
-
-### Run the application
-
-Start the application and its PostgreSQL dependency:
-
-```bash
-docker compose up --build app
-```
-
-The application initializes the database schema and then runs the ETL workflow:
-it requests observations from the DMI API, transforms them, and saves the
-source and measurements to PostgreSQL.
 
 To start PostgreSQL and pgAdmin for database inspection:
 ```bash
@@ -308,16 +401,16 @@ erDiagram
     }
 ```
 
-The database schema is organized around `FACT_MEASUREMENTS`, which stores
-individual environmental observations. Each record contains the observation
-time and measured value, together with foreign keys identifying its data source
-and parameter. `DIM_SOURCES` holds descriptive information about each source,
-such as its name and type, while `DIM_PARAMETERS` defines the measured
-parameters and their units. Each measurement is linked to exactly one source
-and one parameter; each source and parameter can, in turn, be referenced by
-many measurements. This structure keeps measurement data separate from
-descriptive metadata and supports consistent storage and analysis across
-different sources and parameters.
+- `DIM_SOURCES` stores metadata about each data source, including its name and
+  type.
+- `DIM_PARAMETERS` defines the measured parameters and their units.
+- `FACT_MEASUREMENTS` stores each environmental observation's timestamp and
+  numeric value.
+- Each measurement references exactly one source and one parameter through
+  foreign keys.
+- A source and a parameter can each be referenced by multiple measurements.
+- Separating measurements from descriptive metadata supports consistent
+  storage and analysis across sources and parameters.
 
 ---
 
