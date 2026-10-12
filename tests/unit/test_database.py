@@ -1,6 +1,7 @@
 """Unit tests for the database module."""
 
-from unittest.mock import MagicMock, patch
+from hashlib import sha256
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -54,60 +55,122 @@ def test_get_db_connection_delegates_to_get_connection(
     mock_get_connection.assert_called_once_with()
 
 
-@patch("app.database.get_connection")
-def test_create_tables_success(
-    mock_get_connection
+def test_create_tables_applies_and_records_pending_migration(
+    monkeypatch,
+    tmp_path,
 ):
-    """Verify schema creation executes and commits."""
+    """Verify migrations are executed and tracked in one transaction."""
+    migration_sql = "CREATE TABLE example (id INTEGER);"
+    migration_path = tmp_path / "0001_create_example.sql"
+    migration_path.write_text(migration_sql, encoding="utf-8")
+    monkeypatch.setattr("app.database.MIGRATIONS_DIR", tmp_path)
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
-
-    mock_conn.cursor.return_value.__enter__.return_value = (
-        mock_cursor
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    monkeypatch.setattr(
+        "app.database.get_connection",
+        MagicMock(return_value=mock_conn),
     )
-
-    mock_get_connection.return_value = mock_conn
 
     create_tables()
 
-    assert mock_cursor.execute.call_count == 7
-    executed_sql = [
-        call.args[0]
-        for call in mock_cursor.execute.call_args_list
-    ]
-    expected_statements = (
-        "CREATE TABLE IF NOT EXISTS dim_sources",
-        "CREATE TABLE IF NOT EXISTS dim_parameters",
-        "CREATE TABLE IF NOT EXISTS fact_measurements",
-        "CREATE INDEX IF NOT EXISTS idx_fact_measurements_timestamp",
-        "CREATE INDEX IF NOT EXISTS idx_fact_measurements_source",
-        "CREATE INDEX IF NOT EXISTS idx_fact_measurements_parameter",
+    executed_calls = mock_cursor.execute.call_args_list
+    assert len(executed_calls) == 5
+    assert "pg_advisory_xact_lock" in executed_calls[0].args[0]
+    assert "CREATE TABLE IF NOT EXISTS schema_migrations" in (
+        executed_calls[1].args[0]
     )
-    for statement in expected_statements:
-        assert any(statement in sql for sql in executed_sql)
-
-    assert "INSERT INTO dim_parameters" in executed_sql[-1]
-    assert "ON CONFLICT (parameter_id)" in executed_sql[-1]
-
+    assert "SELECT version, name, checksum" in executed_calls[2].args[0]
+    assert executed_calls[3] == call(migration_sql)
+    assert "INSERT INTO schema_migrations" in executed_calls[4].args[0]
+    assert executed_calls[4].args[1] == (
+        1,
+        "create_example",
+        sha256(migration_sql.encode("utf-8")).hexdigest(),
+    )
     mock_conn.commit.assert_called_once()
     mock_conn.rollback.assert_not_called()
     mock_conn.close.assert_called_once()
 
 
-@patch("app.database.get_connection")
-def test_create_tables_rolls_back_and_closes_on_failure(
-    mock_get_connection
+def test_create_tables_skips_recorded_migration(
+    monkeypatch,
+    tmp_path,
 ):
-    """Verify schema failures roll back and still close the connection."""
+    """Verify already applied migrations are not run a second time."""
+    migration_sql = "CREATE TABLE example (id INTEGER);"
+    migration_path = tmp_path / "0001_create_example.sql"
+    migration_path.write_text(migration_sql, encoding="utf-8")
+    monkeypatch.setattr("app.database.MIGRATIONS_DIR", tmp_path)
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    mock_cursor.execute.side_effect = RuntimeError("Schema failure")
-    mock_get_connection.return_value = mock_conn
+    mock_cursor.fetchall.return_value = [
+        (
+            1,
+            "create_example",
+            sha256(migration_sql.encode("utf-8")).hexdigest(),
+        )
+    ]
+    monkeypatch.setattr(
+        "app.database.get_connection",
+        MagicMock(return_value=mock_conn),
+    )
 
-    with pytest.raises(RuntimeError, match="Schema failure"):
+    create_tables()
+
+    assert call(migration_sql) not in mock_cursor.execute.call_args_list
+    mock_conn.commit.assert_called_once()
+    mock_conn.close.assert_called_once()
+
+
+def test_create_tables_rejects_changed_applied_migration(
+    monkeypatch,
+    tmp_path,
+):
+    """Verify migration checksums prevent editing an applied migration."""
+    migration_path = tmp_path / "0001_create_example.sql"
+    migration_path.write_text("SELECT 1;", encoding="utf-8")
+    monkeypatch.setattr("app.database.MIGRATIONS_DIR", tmp_path)
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.fetchall.return_value = [(1, "create_example", "wrong")]
+    monkeypatch.setattr(
+        "app.database.get_connection",
+        MagicMock(return_value=mock_conn),
+    )
+
+    with pytest.raises(RuntimeError, match="must remain immutable"):
+        create_tables()
+
+    mock_conn.rollback.assert_called_once()
+    mock_conn.commit.assert_not_called()
+    mock_conn.close.assert_called_once()
+
+
+def test_create_tables_rolls_back_and_closes_on_failure(
+    monkeypatch,
+    tmp_path,
+):
+    """Verify migration failures roll back and still close the connection."""
+    migration_path = tmp_path / "0001_create_example.sql"
+    migration_path.write_text("SELECT 1;", encoding="utf-8")
+    monkeypatch.setattr("app.database.MIGRATIONS_DIR", tmp_path)
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.execute.side_effect = RuntimeError("Migration failure")
+    monkeypatch.setattr(
+        "app.database.get_connection",
+        MagicMock(return_value=mock_conn),
+    )
+
+    with pytest.raises(RuntimeError, match="Migration failure"):
         create_tables()
 
     mock_conn.rollback.assert_called_once()

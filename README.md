@@ -70,7 +70,7 @@ flowchart LR
     ETL -.->|uses| Transformer
     ETL -.->|uses| Repository
     Source <-->|HTTP observations| DMI
-    Main -.->|initializes schema and opens connection| Database
+    Main -.->|applies migrations and opens connection| Database
     Database -->|schema and connection| PostgreSQL
     Repository -->|SQL operations| PostgreSQL
 
@@ -267,6 +267,25 @@ The schema also includes a unique constraint on:
 (source_id, parameter_id, timestamp)
 ```
 
+### Database migrations
+
+The application applies pending SQL migrations automatically before starting
+the ETL workflow. Migration scripts live in `app/migrations/` and are named
+with a unique, increasing version and a descriptive name, for example
+`0001_initial_schema.sql`. Applied versions and SHA-256 checksums are stored
+in the PostgreSQL `schema_migrations` table. Migrations run in a transaction,
+and a database advisory lock prevents concurrent application instances from
+applying the same migration simultaneously.
+
+The initial migration creates the current schema using idempotent statements,
+so an existing database created by an earlier version of this project can
+adopt migration tracking without dropping its tables or measurement data.
+
+After a migration has been committed, do not edit or rename it. To change the
+schema, add a new migration file with the next version, such as
+`0002_add_station_metadata.sql`. This preserves a consistent upgrade path for
+existing installations.
+
 ### Database ER diagram
 
 The ER diagram describes the PostgreSQL data model and the relationships
@@ -329,6 +348,8 @@ environment_data_project/
 │   │   ├── base.py
 │   │   └── dmi.py
 │   ├── database.py
+│   ├── migrations/
+│   │   └── 0001_initial_schema.sql
 │   ├── etl_service.py
 │   ├── load.py
 │   ├── main.py

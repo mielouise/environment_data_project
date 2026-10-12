@@ -8,10 +8,18 @@ This module is responsible for:
 """
 
 import os
+import re
 import sys
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
 import psycopg
+
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+MIGRATION_FILENAME_PATTERN = re.compile(
+    r"^(?P<version>\d+)_(?P<name>[a-z0-9_]+)\.sql$"
+)
 
 
 def get_connection() -> Any:
@@ -66,88 +74,106 @@ def get_db_connection() -> Any:
 
 
 def create_tables() -> None:
-    """Initialize database schema.
+    """Apply pending database migrations.
 
-    Creates all dimension and fact tables required by the
-    environmental ETL pipeline and seeds the parameter dimension.
+    Migration versions and checksums are stored in ``schema_migrations``.
+    Existing databases are upgraded in place by the initial idempotent
+    migration.
     """
 
-    commands = (
-        """
-        CREATE TABLE IF NOT EXISTS dim_sources (
-            source_id VARCHAR(50) PRIMARY KEY,
-            source_name VARCHAR(100) NOT NULL,
-            source_type VARCHAR(50) NOT NULL
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS dim_parameters (
-            parameter_id INTEGER PRIMARY KEY,
-            parameter_name VARCHAR(100) NOT NULL UNIQUE,
-            unit VARCHAR(20) NOT NULL
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS fact_measurements (
-            measurement_id SERIAL PRIMARY KEY,
+    migrations = []
+    for migration_path in MIGRATIONS_DIR.glob("*.sql"):
+        match = MIGRATION_FILENAME_PATTERN.fullmatch(
+            migration_path.name
+        )
+        if match is None:
+            raise ValueError(
+                "Invalid migration filename "
+                f"{migration_path.name!r}; expected "
+                "<version>_<name>.sql."
+            )
 
-            source_id VARCHAR(50) NOT NULL
-                REFERENCES dim_sources(source_id),
+        migration_sql = migration_path.read_text(encoding="utf-8")
+        migrations.append(
+            (
+                int(match.group("version")),
+                match.group("name"),
+                migration_sql,
+                sha256(migration_sql.encode("utf-8")).hexdigest(),
+            )
+        )
 
-            parameter_id INTEGER NOT NULL
-                REFERENCES dim_parameters(parameter_id),
-
-            timestamp TIMESTAMPTZ NOT NULL,
-
-            value NUMERIC(10, 2) NOT NULL,
-
-            CONSTRAINT unique_measurement
-                UNIQUE (
-                    source_id,
-                    parameter_id,
-                    timestamp
-                )
-        );
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_fact_measurements_timestamp
-        ON fact_measurements (timestamp);
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_fact_measurements_source
-        ON fact_measurements (source_id);
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_fact_measurements_parameter
-        ON fact_measurements (parameter_id);
-        """
-    )
+    migrations.sort(key=lambda migration: migration[0])
+    versions = [migration[0] for migration in migrations]
+    if len(versions) != len(set(versions)):
+        raise ValueError("Database migration versions must be unique.")
 
     conn = get_connection()
 
     try:
         with conn.cursor() as cursor:
-
-            for command in commands:
-                cursor.execute(command)
+            cursor.execute(
+                """
+                SELECT pg_advisory_xact_lock(829271, 1);
+                """
+            )
 
             cursor.execute(
                 """
-                INSERT INTO dim_parameters (
-                    parameter_id,
-                    parameter_name,
-                    unit
-                )
-                VALUES
-                    (1, 'Temperature', '°C'),
-                    (2, 'Humidity', '%'),
-                    (3, 'Humidity Past 1 Hour', '%'),
-                    (4, 'CO2', 'ppm'),
-                    (5, 'PM2.5', 'μg/m³')
-                ON CONFLICT (parameter_id)
-                DO NOTHING;
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    checksum CHAR(64) NOT NULL,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
                 """
             )
+            cursor.execute(
+                """
+                SELECT version, name, checksum
+                FROM schema_migrations;
+                """
+            )
+            applied_migrations = {
+                version: (name, checksum.strip())
+                for version, name, checksum in cursor.fetchall()
+            }
+            available_migrations = {
+                version: (name, migration_checksum, migration_sql)
+                for version, name, migration_sql, migration_checksum
+                in migrations
+            }
+
+            for version, (name, checksum) in applied_migrations.items():
+                migration = available_migrations.get(version)
+                if migration is None:
+                    raise RuntimeError(
+                        f"Applied database migration {version} is "
+                        "missing from the migrations directory."
+                    )
+                if migration[:2] != (name, checksum):
+                    raise RuntimeError(
+                        f"Applied database migration {version} has "
+                        "changed; committed migrations must remain "
+                        "immutable."
+                    )
+
+            for version, name, migration_sql, checksum in migrations:
+                if version in applied_migrations:
+                    continue
+
+                cursor.execute(migration_sql)
+                cursor.execute(
+                    """
+                    INSERT INTO schema_migrations (
+                        version,
+                        name,
+                        checksum
+                    )
+                    VALUES (%s, %s, %s);
+                    """,
+                    (version, name, checksum),
+                )
 
         conn.commit()
 
