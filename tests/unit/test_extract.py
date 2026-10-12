@@ -8,7 +8,7 @@ from requests import RequestException
 from app.extract import DMIDataSource
 
 
-@patch("app.extract.requests.get")
+@patch("app.extract.dmi.requests.get")
 def test_dmi_data_source_fetch_success(
     mock_get
 ):
@@ -54,7 +54,7 @@ def test_dmi_data_source_fetch_success(
     )
 
 
-@patch("app.extract.requests.get")
+@patch("app.extract.dmi.requests.get")
 def test_dmi_data_source_fetch_failure(
     mock_get
 ):
@@ -86,7 +86,7 @@ def test_dmi_data_source_fetch_failure(
     )
 
 
-@patch("app.extract.requests.get")
+@patch("app.extract.dmi.requests.get")
 def test_dmi_data_source_fetch_http_failure(
     mock_get
 ):

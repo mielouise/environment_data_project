@@ -36,12 +36,19 @@ This project demonstrates database integration, API consumption, containerized d
 ```text
 environment_data_project/
 ├── app/
-│   ├── api/
-│   ├── database/
-│   ├── models/
-│   ├── services/
-│   └── main.py
+│   ├── constants/
+│   ├── extract/
+│   │   ├── base.py
+│   │   └── dmi.py
+│   ├── database.py
+│   ├── etl_service.py
+│   ├── load.py
+│   ├── main.py
+│   └── transform.py
 ├── tests/
+│   ├── integration/
+│   │   └── test_postgres.py
+│   └── unit/
 ├── docker-compose.yml
 ├── requirements.txt
 └── README.md
@@ -66,10 +73,14 @@ cd environment_data_project
 ### Start the Application
 
 ```bash
-docker compose run --build app
+docker compose up --build app
 ```
 
 ## Running Tests
+
+The test suite includes integration tests that connect to PostgreSQL and the
+DMI API. Ensure the database settings and `DMI_API_URL` are configured in
+`.env`, and that the test environment can reach the DMI API.
 
 ```bash
 docker compose run --build --rm tests

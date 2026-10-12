@@ -3,7 +3,7 @@
 Coordinates the complete Extract, Transform, and Load workflow.
 """
 
-from app.extract import DMIDataSource
+from app.extract import SensorDataSource
 from app.load import MeasurementRepository
 from app.transform import (
     DMIDataTransformer,
@@ -16,7 +16,7 @@ class ETLService:
 
     def __init__(
         self,
-        source: DMIDataSource,
+        source: SensorDataSource,
         transformer: DMIDataTransformer,
         repository: MeasurementRepository
     ) -> None:
