@@ -33,13 +33,16 @@ This project demonstrates database integration, API consumption, containerized d
 
 ## Architecture
 
-The application retrieves environmental observations from the DMI API,
-transforms supported observations into measurement records, and persists them
-in PostgreSQL. The diagrams below show the architecture from three different
-perspectives: an application component overview, the UML class structure, and
-the runtime ETL workflow. Docker, Docker Compose, pgAdmin, and the test runner
-are intentionally excluded because they are development or operational tools
-rather than application components.
+The diagrams below describe the solution from four different
+perspectives:
+
+1. Application component architecture
+2. UML class design
+3. Runtime ETL workflow
+4. Database design
+
+Together these views document the system at component, implementation,
+execution, and database levels.
 
 ### Application component overview
 
@@ -170,7 +173,7 @@ flowchart TD
     SaveMeasurements["7. Call save_measurements(records)"]
     HasRecords{"Any measurements?"}
     WriteRecords["Insert or update measurements<br/>in PostgreSQL"]
-    NoRecords["No database writes required"]
+    NoRecords["No measurement rows to write"]
     Count["Return processed measurement count"]
     ReportSuccess["Report successful completion"]
     ReportFailure["Log error and exit<br/>with failure status"]
@@ -208,6 +211,103 @@ flowchart TD
     class ReportSuccess success
     class ReportFailure failure
 ```
+
+### Database Design
+
+The database follows a normalized dimensional design consisting of one
+fact table and two dimension tables.
+
+This design was chosen to reduce data redundancy, improve data integrity,
+and make it easier to extend the solution with additional environmental
+measurement types in the future.
+
+#### Dimension Tables
+
+##### DIM_SOURCES
+
+Stores metadata describing each measurement source.
+
+Examples:
+
+- DMI Observation API
+- Future environmental APIs
+- Sensor networks
+
+##### DIM_PARAMETERS
+
+Stores metadata describing measurable environmental parameters and
+their associated units.
+
+Examples:
+
+| ID | Parameter | Unit |
+|----|-----------|------|
+| 1 | Temperature | °C |
+| 2 | Humidity | % |
+| 3 | Humidity Past 1 Hour | % |
+| 4 | CO2 | ppm |
+| 5 | PM2.5 | μg/m³ |
+
+#### Fact Table
+
+##### FACT_MEASUREMENTS
+
+Stores individual environmental observations.
+
+Each measurement references:
+
+- one source
+- one parameter
+
+through foreign-key relationships.
+
+The schema also includes a unique constraint on:
+
+```sql
+(source_id, parameter_id, timestamp)
+```
+
+### Database ER diagram
+
+The ER diagram describes the PostgreSQL data model and the relationships
+between its tables.
+
+```mermaid
+erDiagram
+    DIM_SOURCES ||--o{ FACT_MEASUREMENTS : records
+    DIM_PARAMETERS ||--o{ FACT_MEASUREMENTS : classifies
+
+    DIM_SOURCES {
+        VARCHAR source_id PK "Unique source identifier"
+        VARCHAR source_name "Source name"
+        VARCHAR source_type "API, Sensor etc."
+    }
+
+    DIM_PARAMETERS {
+        INTEGER parameter_id PK "Parameter identifier"
+        VARCHAR parameter_name "Temperature, Humidity, CO2..."
+        VARCHAR unit "Measurement unit"
+    }
+
+    FACT_MEASUREMENTS {
+        SERIAL measurement_id PK "Measurement identifier"
+        VARCHAR source_id FK "References DIM_SOURCES"
+        INTEGER parameter_id FK "References DIM_PARAMETERS"
+        TIMESTAMPTZ timestamp "Observation time"
+        NUMERIC value "Measurement value"
+    }
+```
+
+- `DIM_SOURCES` stores metadata about each data source, including its name and
+  type.
+- `DIM_PARAMETERS` defines the measured parameters and their units.
+- `FACT_MEASUREMENTS` stores each environmental observation's timestamp and
+  numeric value.
+- Each measurement references exactly one source and one parameter through
+  foreign keys.
+- A source and a parameter can each be referenced by multiple measurements.
+- Separating measurements from descriptive metadata supports consistent
+  storage and analysis across sources and parameters.
 
 ---
 
@@ -364,47 +464,6 @@ way.
 2. Transform the data into the required database format.
 3. Load the processed data into PostgreSQL.
 4. Validate functionality through automated tests.
-
----
-
-## Database Schema
-
-```mermaid
-erDiagram
-    DIM_SOURCES ||--o{ FACT_MEASUREMENTS : records
-    DIM_PARAMETERS ||--o{ FACT_MEASUREMENTS : classifies
-
-    DIM_SOURCES {
-        VARCHAR source_id PK "Unique source identifier"
-        VARCHAR source_name "Source name"
-        VARCHAR source_type "API, Sensor etc."
-    }
-
-    DIM_PARAMETERS {
-        INTEGER parameter_id PK "Parameter identifier"
-        VARCHAR parameter_name "Temperature, Humidity, CO2..."
-        VARCHAR unit "Measurement unit"
-    }
-
-    FACT_MEASUREMENTS {
-        SERIAL measurement_id PK "Measurement identifier"
-        VARCHAR source_id FK "References DIM_SOURCES"
-        INTEGER parameter_id FK "References DIM_PARAMETERS"
-        TIMESTAMPTZ timestamp "Observation time"
-        NUMERIC value "Measurement value"
-    }
-```
-
-- `DIM_SOURCES` stores metadata about each data source, including its name and
-  type.
-- `DIM_PARAMETERS` defines the measured parameters and their units.
-- `FACT_MEASUREMENTS` stores each environmental observation's timestamp and
-  numeric value.
-- Each measurement references exactly one source and one parameter through
-  foreign keys.
-- A source and a parameter can each be referenced by multiple measurements.
-- Separating measurements from descriptive metadata supports consistent
-  storage and analysis across sources and parameters.
 
 ---
 
