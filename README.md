@@ -35,9 +35,17 @@ This project demonstrates database integration, API consumption, containerized d
 
 ```text
 environment_data_project/
+├── .devcontainer/
+│   ├── Dockerfile
+│   ├── devcontainer-lock.json
+│   └── devcontainer.json
 ├── app/
+│   ├── __init__.py
 │   ├── constants/
+│   │   ├── __init__.py
+│   │   └── parameters.py
 │   ├── extract/
+│   │   ├── __init__.py
 │   │   ├── base.py
 │   │   └── dmi.py
 │   ├── database.py
@@ -45,14 +53,65 @@ environment_data_project/
 │   ├── load.py
 │   ├── main.py
 │   └── transform.py
+├── pgadmin/
+│   └── servers.json
 ├── tests/
+│   ├── __init__.py
 │   ├── integration/
+│   │   ├── __init__.py
+│   │   ├── test_dmi_api.py
 │   │   └── test_postgres.py
 │   └── unit/
+│       ├── __init__.py
+│       ├── test_database.py
+│       ├── test_etl_service.py
+│       ├── test_extract.py
+│       ├── test_load.py
+│       ├── test_main.py
+│       └── test_transform.py
+├── .dockerignore
+├── .gitignore
+├── Dockerfile
 ├── docker-compose.yml
+├── requirements-dev.txt
 ├── requirements.txt
 └── README.md
 ```
+
+## File overview
+
+- The `app` directory contains the application code. Docker starts the
+  application through `app/main.py`, which orchestrates the ETL process. This
+  file is therefore the recommended application entry point.
+- The `app/extract` directory contains the code for retrieving data from the
+  DMI API, including a shared abstraction for data sources.
+- The `app/constants` directory contains shared constants, including IDs for
+  the supported measurement parameters.
+- `app/transform.py`, `app/load.py`, `app/database.py`, and
+  `app/etl_service.py` handle data transformation, data storage, database
+  connections, and orchestration of the ETL process, respectively.
+- The `tests` directory contains the test suite, which is run by the `tests`
+  service in Docker Compose. It is divided into two subdirectories:
+  - The `tests/unit` directory contains unit tests that test application code
+    in isolation from external systems, for example by using mocks.
+  - The `tests/integration` directory contains integration tests that verify
+    connections to external systems. `test_postgres.py` tests the connection
+    to PostgreSQL, and `test_dmi_api.py` sends a request to the configured DMI
+    API.
+- `Dockerfile` defines the Docker image for the application and tests.
+  `docker-compose.yml` configures the app, test, PostgreSQL, and pgAdmin
+  services.
+- `.gitignore` specifies which files Git should ignore, such as local
+  environment settings. `.dockerignore` specifies which files to exclude from
+  the Docker build context.
+- `requirements.txt` lists the Python packages required by the application.
+  `requirements-dev.txt` includes these packages along with additional
+  packages needed for development and testing.
+- The `.devcontainer` directory contains the development container
+  configuration, and the `pgadmin` directory contains the pgAdmin
+  configuration.
+- `README.md` contains the project description, setup instructions, and
+  database schema documentation.
 
 ---
 
@@ -139,6 +198,17 @@ erDiagram
         NUMERIC value "Measurement value"
     }
 ```
+
+The database schema is organized around `FACT_MEASUREMENTS`, which stores
+individual environmental observations. Each record contains the observation
+time and measured value, together with foreign keys identifying its data source
+and parameter. `DIM_SOURCES` holds descriptive information about each source,
+such as its name and type, while `DIM_PARAMETERS` defines the measured
+parameters and their units. Each measurement is linked to exactly one source
+and one parameter; each source and parameter can, in turn, be referenced by
+many measurements. This structure keeps measurement data separate from
+descriptive metadata and supports consistent storage and analysis across
+different sources and parameters.
 
 ---
 
