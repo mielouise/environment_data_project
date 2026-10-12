@@ -62,27 +62,26 @@ flowchart LR
 ```
 
 The following UML class diagram shows the main software components and their
-dependencies. The stereotypes identify each component's role in the
-architecture.
+dependencies.
 
 ```mermaid
 classDiagram
     direction LR
 
-    class Main <<entry point>>
-    class ETLService <<orchestrator>>
-    class SensorDataSource <<interface>>
-    class DMIDataSource <<component>>
-    class DMI_API <<external system>>
-    class DMIDataTransformer <<component>>
-    class MeasurementDTO <<data object>>
-    class MeasurementRepository <<component>>
-    class PostgreSQL <<external database>>
+    class Main
+    class ETLService
+    class SensorDataSource
+    class DMIDataSource
+    class DMIObservationAPI
+    class DMIDataTransformer
+    class MeasurementDTO
+    class MeasurementRepository
+    class PostgreSQL
 
     Main ..> ETLService : creates and runs
     ETLService --> SensorDataSource : fetches data from
     DMIDataSource ..|> SensorDataSource : implements
-    DMIDataSource --> DMI_API : HTTP request
+    DMIDataSource --> DMIObservationAPI : requests observations
     ETLService --> DMIDataTransformer : transforms response
     DMIDataTransformer ..> MeasurementDTO : creates
     ETLService --> MeasurementRepository : persists results
