@@ -1,25 +1,41 @@
 # Environment Data Project
 
-A Python-based ETL (Extract, Transform, Load) application that collects weather and environmental data from the Danish Meteorological Institute (DMI) API, processes the data, and stores it in a PostgreSQL database.
+A Python ETL application that retrieves environmental observations from the
+Danish Meteorological Institute (DMI), transforms supported measurements, and
+stores them in PostgreSQL.
 
-This project demonstrates database integration, API consumption, containerized development, automated testing, and object-oriented programming principles.
+The project is organized into extraction, transformation, and persistence
+components, with versioned database migrations and automated unit and
+integration tests.
+
+---
+
+## Contents
+
+- [Features](#features)
+- [Technology stack](#technology-stack)
+- [Getting started](#getting-started)
+- [Project structure](#project-structure)
+- [File overview](#file-overview)
+- [Architecture](#architecture)
+- [Learning objectives](#learning-objectives)
+- [Author](#author)
 
 ---
 
 ## Features
 
-- Extract weather and environmental data from the DMI API
-- Transform raw API responses into a structured format
-- Load processed data into PostgreSQL
-- Containerized development environment using Docker Compose
-- Database management through pgAdmin
-- Automated testing with Pytest
-- Clean, maintainable, and object-oriented Python code
-- Type hints, docstrings, and PEP 8 compliant codebase
+- Retrieve environmental observations from the DMI API
+- Transform supported temperature, humidity, CO2, and PM2.5 observations
+- Store source metadata and measurements in PostgreSQL
+- Apply versioned SQL migrations automatically at startup
+- Run unit and integration tests with Pytest
+- Use Docker Compose for local development and execution
+- Manage the database through pgAdmin
 
 ---
 
-## Technology Stack
+## Technology stack
 
 - **Python 3**
 - **PostgreSQL**
@@ -31,14 +47,14 @@ This project demonstrates database integration, API consumption, containerized d
 
 ---
 
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
 - Git
 - Docker Desktop with Docker Compose
 
-### Clone the Repository
+### Clone the repository
 
 ```bash
 git clone https://github.com/mielouise/environment_data_project.git
@@ -57,6 +73,7 @@ workflow: it requests observations from the DMI API, transforms them, and
 saves the source and measurements to PostgreSQL.
 
 To start PostgreSQL and pgAdmin for database inspection:
+
 ```bash
 docker compose up -d db pgadmin
 ```
@@ -93,7 +110,7 @@ the environment must have network access to DMI.
 
 ---
 
-## Project Structure
+## Project structure
 
 ```text
 environment_data_project/
@@ -377,7 +394,7 @@ The workflow proceeds as follows:
 7. If setup or processing fails, report the error and close the database
    connection if one was opened.
 
-#### Database Migrations
+#### Database migrations
 
 The application applies pending SQL migrations automatically before starting
 the ETL workflow. Migration scripts live in `app/migrations/` and are named
@@ -396,7 +413,7 @@ schema, add a new migration file with the next version, such as
 `0002_add_station_metadata.sql`. This preserves a consistent upgrade path for
 existing installations.
 
-### Database Design
+### Database design
 
 The database follows a normalized dimensional design consisting of one
 fact table and two dimension tables.
@@ -405,7 +422,7 @@ This design was chosen to reduce data redundancy, improve data integrity,
 and make it easier to extend the solution with additional environmental
 measurement types in the future.
 
-#### Dimension Tables
+#### Dimension tables
 
 ##### DIM_SOURCES
 
@@ -432,7 +449,7 @@ Examples:
 | 4 | CO2 | ppm |
 | 5 | PM2.5 | μg/m³ |
 
-#### Fact Table
+#### Fact table
 
 ##### FACT_MEASUREMENTS
 
@@ -451,7 +468,7 @@ The schema also includes a unique constraint on:
 (source_id, parameter_id, timestamp)
 ```
 
-#### Entity Relationship Diagram
+#### Entity relationship diagram
 
 The ER diagram describes the PostgreSQL data model and the relationships
 between its tables.
@@ -495,16 +512,25 @@ erDiagram
 
 ---
 
-## Learning Objectives
+## Learning objectives
 
-This project was developed to demonstrate:
+After completing this project, participants should be able to:
 
-- REST API integration
-- ETL pipeline implementation
-- PostgreSQL database design and management
-- Docker-based development environments
-- Automated testing practices
-- Object-oriented Python development
+- **Apply ETL principles:** separate extraction, transformation, and loading
+  responsibilities.
+- **Integrate external APIs:** process API responses and handle missing,
+  unexpected, or erroneous data.
+- **Design comparable data models:** structure measurements from multiple
+  sources and justify the schema.
+- **Use PostgreSQL:** configure a database and write data from application code.
+- **Build reliable pipelines:** support repeated runs without duplicate or
+  destructive writes.
+- **Test integrations effectively:** isolate external services in unit tests
+  and target at least 95% test coverage.
+- **Plan for data reuse:** consider how collection choices support future
+  analysis, including workplace environmental quality.
+- **Deliver professionally:** maintain the remote repository and document
+  setup, build, testing, execution, architecture, and UML in the README.
 
 ---
 
