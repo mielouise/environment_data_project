@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 
 from app.database import create_tables, get_db_connection
 from app.extract import DMIDataSource
-from app.extract.stations import DMIStationSource
 from app.load import MeasurementRepository
 from app.pipelines.weather_pipeline import run_weather_pipeline
 
@@ -41,7 +40,7 @@ def run_once() -> int:
     source = DMIDataSource("DMI", "DMI Observation API", url)
     station_source = None
     if os.environ.get("DMI_FETCH_STATIONS", "true").lower() in ("1", "true", "yes"):
-        station_source = DMIStationSource(
+        station_source = DMIDataSource(
             "DMI_STATIONS", "DMI Station API",
             os.environ.get(
                 "DMI_STATIONS_URL",
