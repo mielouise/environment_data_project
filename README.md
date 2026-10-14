@@ -97,7 +97,7 @@ way.
 
 ### Testing
 
-Run the complete test suite, including the unit tests and integration tests:
+The GitHub Actions unit-test workflow requires at least **95% statement coverage**. Run the complete test suite, including unit and integration tests:
 
 ```bash
 docker compose run --build --rm tests
@@ -402,7 +402,7 @@ The observation client sends `parameterId`, `datetime`, `limit` and `offset` to 
 
 ### Parameter selection and limitations
 
-The pre-existing dimension includes `temp_dry`, `humidity`, `humidity_past1h`, `co2` and `pm25`. **Only `temp_dry` and `humidity` are configured by default.** Other internal mappings are retained for compatibility, but the meteorological observation collection does not necessarily provide every mapped environmental variable. Unsupported parameters are not blindly added to the database: each addition requires confirmation of the provider's documented parameter names and units, a matching dimension entry, and tests. This is why the project intentionally does not collect all available DMI measurements.
+The pre-existing database dimension includes historical `co2` and `pm25` rows, but the metObs transformer deliberately only accepts `temp_dry`, `humidity`, and `humidity_past1h`. **Only `temp_dry` and `humidity` are fetched by default.** We retain old SQL migration contents because applied migrations have immutable checksums; unsupported measurements are not ingested. Adding new parameters requires validation against the DMI catalog, dimension data and tests.
 
 Stations have geographical point coordinates, and observations reference their IDs. The additional `0003_station_history.sql` migration preserves individual DMI metadata versions in `dim_station_versions`; measurements can be linked to the station version valid at observation time.
 
