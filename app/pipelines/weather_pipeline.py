@@ -1,6 +1,6 @@
 """Concrete pipeline comprising multiple DMI requests and two destination tables."""
-from app.transform_steps.observations import transform_measurements
-from app.transform_steps.stations import transform_stations
+from app.transform.observations import transform_measurements
+from app.transform.stations import transform_stations
 
 
 def run_weather_pipeline(source, repository, *, station_source=None, params=None):
