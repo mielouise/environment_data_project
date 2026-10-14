@@ -33,7 +33,7 @@ PGADMIN_PASSWORD=dummy
 EOF
  
 - name: Build image
-run: docker compose build app
+run: docker compose --build app
  
 - name: Run ETL pipeline
 run: docker compose run --rm app
