@@ -133,7 +133,6 @@ environment_data_project/
 │   ├── database.py
 │   ├── migration_runner.py
 │   ├── main.py
-│   └── etl_service.py  # deprecated compatibility adapter
 ├── tests/
 │   ├── unit/
 │   └── integration/
@@ -143,257 +142,87 @@ environment_data_project/
 
 ## File overview
 
-- The `app` directory contains the application code. Docker starts the
-  application through `app/main.py`, which orchestrates the ETL process. This
-  file is therefore the recommended application entry point.
-- The `app/extract` directory contains the code for retrieving data from the
-  DMI API, including a shared abstraction for data sources.
-- The `app/constants` directory contains shared constants, including IDs for
-  the supported measurement parameters.
-- The `app/migrations` directory contains versioned SQL scripts for creating
-  and updating the database schema.
-- `app/transform.py`, `app/load.py`, `app/database.py`, and
-  `app/etl_service.py` handle data transformation, data storage, database
-  connections, and orchestration of the ETL process, respectively.
-- The `tests` directory contains the test suite, which is run by the `tests`
-  service in Docker Compose. It is divided into two subdirectories:
-  - The `tests/unit` directory contains unit tests that test application code
-    in isolation from external systems, for example by using mocks.
-  - The `tests/integration` directory contains integration tests that verify
-    connections to external systems. `test_postgres.py` tests the connection
-    to PostgreSQL, and `test_dmi_api.py` sends a request to the configured DMI
-    API.
-- `Dockerfile` defines the Docker image for the application and tests.
-  `docker-compose.yml` configures the app, test, PostgreSQL, and pgAdmin
-  services.
-- `.gitignore` specifies which files Git should ignore, such as local
-  environment settings. `.dockerignore` specifies which files to exclude from
-  the Docker build context.
-- `requirements.txt` lists the Python packages required by the application.
-  `requirements-dev.txt` includes these packages along with additional
-  packages needed for development and testing.
-- The `.devcontainer` directory contains the development container
-  configuration, and the `pgadmin` directory contains the pgAdmin
-  configuration.
-- `README.md` contains the project description, setup instructions, and
-  database schema documentation.
+The application follows four consistent ETL stage directories:
 
----
+- `app/extract/`: one small `DMIDataSource` HTTP client for observations and stations, including API filters and pagination.
+- `app/transform/`: pure, separately testable functions and immutable measurement/station DTOs.
+- `app/load/`: `MeasurementRepository` encapsulates PostgreSQL persistence, station versions and measurement upserts.
+- `app/pipelines/`: `run_weather_pipeline()` explicitly defines execution order and dependencies.
+
+`app/main.py` configures execution and scheduling; `app/database.py` handles connections; `app/migration_runner.py` handles schema migration tracking. SQL changes are in `app/migrations/`. Tests are separated into `tests/unit/` and `tests/integration/`.
 
 ## Architecture
 
-The diagrams below describe the solution from four different
-perspectives:
+The design favors **single responsibility**, small functions, descriptive names, and pragmatic object orientation. Classes are used for the HTTP client, repository, and immutable data transfer objects because they have meaningful shared behavior or structure. No abstract base class or service wrapper is introduced for a single concrete implementation.
 
-1. Application component architecture
-2. UML class design
-3. Runtime ETL workflow
-4. Database design
-
-Together these views document the system at component, implementation,
-execution, and database levels.
-
-### Application component overview
-
-- Shows the main application components and their responsibilities.
-- Shows how the application communicates with the DMI API and PostgreSQL.
+### Component diagram
 
 ```mermaid
 flowchart LR
-    subgraph Application["Application"]
-        direction TB
-        Main["«component»<br/>Application entry point<br/>app/main.py"]
-        ETL["«component»<br/>ETL orchestrator<br/>ETLService"]
-        Source["«component»<br/>DMI data source<br/>DMIDataSource"]
-        Transformer["«component»<br/>Data transformer<br/>DMIDataTransformer"]
-        Repository["«component»<br/>Measurement repository<br/>MeasurementRepository"]
-        Database["«component»<br/>Database utilities<br/>app/database.py"]
-    end
-
-    DMI["«external system»<br/>DMI Observation API"]
-    PostgreSQL[("«database»<br/>PostgreSQL")]
-
-    Main -.->|creates and runs| ETL
-    ETL -.->|uses| Source
-    ETL -.->|uses| Transformer
-    ETL -.->|uses| Repository
-    Source <-->|HTTP observations| DMI
-    Main -.->|applies migrations and opens connection| Database
-    Database -->|schema and connection| PostgreSQL
-    Repository -->|SQL operations| PostgreSQL
-
-    classDef application fill:#eff6ff,stroke:#2563eb,color:#0f172a,stroke-width:1.5px
-    classDef external fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-width:1.5px
-    classDef datastore fill:#ecfdf5,stroke:#059669,color:#064e3b,stroke-width:1.5px
-
-    class Main,ETL,Source,Transformer,Repository,Database application
-    class DMI external
-    class PostgreSQL datastore
+    Main["main.py: configuration / scheduler"] --> Pipeline["run_weather_pipeline()"]
+    Pipeline --> Client["DMIDataSource"]
+    Client --> DMI["DMI observation and station endpoints"]
+    Pipeline --> Normalize["Pure transformation functions"]
+    Normalize --> DTO["MeasurementDTO / StationDTO"]
+    DTO --> Repository["MeasurementRepository"]
+    Pipeline --> Repository
+    Repository --> PostgreSQL[("PostgreSQL")]
+    Main --> Database["Database / migration runner"]
+    Database --> PostgreSQL
 ```
 
 ### UML class diagram
 
-- Shows the static structure of the main ETL classes, including their key
-  attributes and methods.
-- The solid inheritance arrow shows that `DMIDataSource` extends
-  `SensorDataSource`.
-- The solid associations show which data source, transformer, and repository
-  `ETLService` uses.
-- The dashed dependencies show that the transformer creates `MeasurementDTO`
-  objects and uses `ParameterIds`, while the repository persists the DTOs.
-
 ```mermaid
 classDiagram
-    direction LR
-
-    class SensorDataSource {
-        <<abstract>>
+    class DMIDataSource {
         +source_id: str
         +source_name: str
-        +fetch() dict
-    }
-
-    class DMIDataSource {
         +url: str
-        +fetch() dict
+        +fetch(params) dict
     }
-
-    class ETLService {
-        -source: SensorDataSource
-        -transformer: DMIDataTransformer
-        -repository: MeasurementRepository
-        +run() int
-    }
-
-    class DMIDataTransformer {
-        -source_id: str
-        +transform(raw_json) list~MeasurementDTO~
-    }
-
     class MeasurementDTO {
+        <<dataclass frozen>>
         +source_id: str
         +parameter_id: int
         +timestamp: datetime
         +value: float
+        +station_id: str
     }
-
+    class StationDTO {
+        <<dataclass frozen>>
+        +station_id: str
+        +valid_from: datetime
+        +valid_to: datetime
+        +latitude: float
+        +longitude: float
+    }
     class MeasurementRepository {
         -_conn
-        +save_source(source_id, source_name, source_type) None
-        +save_measurements(records) None
+        +save_source(...) None
+        +save_stations(...) None
+        +save_measurements(...) None
         +close() None
     }
-
-    class ParameterIds {
-        <<enumeration>>
-        TEMPERATURE
-        HUMIDITY
-        HUMIDITY_PAST_1H
-        CO2
-        PM25
-    }
-
-    SensorDataSource <|-- DMIDataSource
-
-    ETLService --> SensorDataSource : uses
-    ETLService --> DMIDataTransformer : uses
-    ETLService --> MeasurementRepository : uses
-    DMIDataTransformer ..> MeasurementDTO : creates
-    DMIDataTransformer ..> ParameterIds : maps parameter IDs
     MeasurementRepository ..> MeasurementDTO : persists
+    MeasurementRepository ..> StationDTO : persists
 ```
+
+The pipeline and transformation stages use functions, so they are intentionally not modeled as unnecessary classes.
 
 ### ETL workflow
 
-The single activity diagram below shows the complete application run, including
-database migrations before the ETL path, decision points, error handling, and
-connection cleanup.
-
 ```mermaid
 flowchart TD
-    Start((Start))
-    InitSchema["1. Apply pending database migrations"]
-    ReadURL["2. Read DMI_API_URL"]
-    HasURL{"API URL configured?"}
-    BuildServices["3. Create data source, transformer,<br/>database connection, repository,<br/>and ETL service"]
-    Fetch["4. Fetch observations from DMI API"]
-    Transform["5. Transform supported observations<br/>into MeasurementDTO records"]
-    SaveSource["6. Save DMI source metadata"]
-    SaveMeasurements["7. Call save_measurements(records)"]
-    HasRecords{"Any measurements?"}
-    WriteRecords["Insert or update measurements<br/>in PostgreSQL"]
-    NoRecords["No measurement rows to write"]
-    Count["Return processed measurement count"]
-    ReportSuccess["Report successful completion"]
-    ReportFailure["Log error and exit<br/>with failure status"]
-    Cleanup["Close application database connection<br/>if one was opened"]
-    End((End))
-
-    Start --> InitSchema --> ReadURL --> HasURL
-    HasURL -->|Yes| BuildServices --> Fetch
-    Transform --> SaveSource
-    Fetch --> Transform
-    SaveSource --> SaveMeasurements --> HasRecords
-    HasRecords -->|Yes| WriteRecords --> Count
-    HasRecords -->|No| NoRecords --> Count
-    Count --> ReportSuccess --> Cleanup --> End
-    HasURL -->|No| ReportFailure
-    ReportFailure --> Cleanup
-
-    InitSchema -. error .-> ReportFailure
-    BuildServices -. error .-> ReportFailure
-    Fetch -. error .-> ReportFailure
-    Transform -. error .-> ReportFailure
-    SaveSource -. error .-> ReportFailure
-    SaveMeasurements -. error .-> ReportFailure
-    WriteRecords -. error .-> ReportFailure
-
-    classDef terminal fill:#0f766e,color:#ffffff,stroke:#115e59,stroke-width:2px
-    classDef action fill:#eff6ff,color:#0f172a,stroke:#2563eb,stroke-width:1.5px
-    classDef decision fill:#fff7ed,color:#0f172a,stroke:#ea580c,stroke-width:1.5px
-    classDef success fill:#dcfce7,color:#14532d,stroke:#16a34a,stroke-width:1.5px
-    classDef failure fill:#fee2e2,color:#7f1d1d,stroke:#dc2626,stroke-width:1.5px
-
-    class Start,End terminal
-    class InitSchema,ReadURL,BuildServices,Fetch,Transform,SaveSource,SaveMeasurements,WriteRecords,NoRecords,Count,Cleanup action
-    class HasURL,HasRecords decision
-    class ReportSuccess success
-    class ReportFailure failure
+    Scheduler["Start one run or scheduled iteration"] --> FetchStations["Extract station versions (optional)"]
+    FetchStations --> TransformStations["transform_stations()"]
+    TransformStations --> LoadStations["save_stations()"]
+    LoadStations --> FetchObservations["Extract filtered observation pages"]
+    FetchObservations --> TransformObservations["transform_measurements()"]
+    TransformObservations --> SaveSource["save_source()"]
+    SaveSource --> SaveMeasurements["save_measurements()"]
+    SaveMeasurements --> End["Close connection"]
 ```
-
-The workflow proceeds as follows:
-
-1. Apply pending database migrations to create or update the database schema.
-2. Read the `DMI_API_URL` setting.
-3. If the URL is configured, create the data source, transformer, database
-   connection, repository, and ETL service.
-4. Fetch observations from the DMI API and transform supported observations
-   into measurement records.
-5. Save the DMI source metadata, then insert or update the measurement records
-   in PostgreSQL when any are available.
-6. Report the number of processed measurements and close the database
-   connection.
-7. If setup or processing fails, report the error and close the database
-   connection if one was opened.
-
-#### Database migrations
-
-The application applies pending SQL migrations automatically before starting
-the ETL workflow. Migration scripts live in `app/migrations/` and are named
-with a unique, increasing version and a descriptive name, for example
-`0001_initial_schema.sql`. Applied versions and SHA-256 checksums are stored
-in the PostgreSQL `schema_migrations` table. Migrations run in a transaction,
-and a database advisory lock prevents concurrent application instances from
-applying the same migration simultaneously.
-
-The initial migration creates the current schema using idempotent statements,
-so an existing database created by an earlier version of this project can
-adopt migration tracking without dropping its tables or measurement data.
-
-After a migration has been committed, do not edit or rename it. To change the
-schema, add a new migration file with the next version, such as
-`0002_add_station_metadata.sql`. This preserves a consistent upgrade path for
-existing installations.
 
 ### Database design
 
@@ -532,7 +361,7 @@ The application now exposes one concrete orchestration function, `run_weather_pi
 ```mermaid
 flowchart TD
     Main[main: single run or periodic poll] --> Pipeline[run_weather_pipeline]
-    Pipeline --> Stations[extract/stations.py]
+    Pipeline --> Stations[extract/dmi.py: station endpoint]
     Pipeline --> Observations[extract/dmi.py]
     Stations --> StationTransform[transform/stations.py]
     Observations --> MeasurementTransform[transform/observations.py]
