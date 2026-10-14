@@ -1,6 +1,6 @@
 CREATE TABLE dim_stations (
     station_id VARCHAR(50) PRIMARY KEY,
-    station_name VARCHAR(100) NOT NULL,
+    name VARCHAR(100) NOT NULL,
     station_type VARCHAR(50) NOT NULL,
     country_code VARCHAR(3) NOT NULL,
     latitude DOUBLE PRECISION NOT NULL,
