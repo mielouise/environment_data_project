@@ -40,3 +40,8 @@ def test_fetch_rejects_invalid_payload(mock_get):
     mock_get.return_value.json.return_value = {"other": []}
     with pytest.raises(RuntimeError, match="Unexpected DMI"):
         source().fetch()
+
+
+def test_fetch_rejects_non_positive_page_size():
+    with pytest.raises(ValueError, match="positive"):
+        source().fetch({"limit": 0})
