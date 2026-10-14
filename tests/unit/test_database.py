@@ -5,8 +5,9 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from app.migrations import create_tables
+
 from app.database import (
-    create_tables,
     get_connection,
     get_db_connection,
 )
@@ -63,13 +64,13 @@ def test_create_tables_applies_and_records_pending_migration(
     migration_sql = "CREATE TABLE example (id INTEGER);"
     migration_path = tmp_path / "0001_create_example.sql"
     migration_path.write_text(migration_sql, encoding="utf-8")
-    monkeypatch.setattr("app.database.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("app.migrations.MIGRATIONS_DIR", tmp_path)
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
     monkeypatch.setattr(
-        "app.database.get_connection",
+        "app.migrations.get_connection",
         MagicMock(return_value=mock_conn),
     )
 
@@ -102,7 +103,7 @@ def test_create_tables_skips_recorded_migration(
     migration_sql = "CREATE TABLE example (id INTEGER);"
     migration_path = tmp_path / "0001_create_example.sql"
     migration_path.write_text(migration_sql, encoding="utf-8")
-    monkeypatch.setattr("app.database.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("app.migrations.MIGRATIONS_DIR", tmp_path)
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -115,7 +116,7 @@ def test_create_tables_skips_recorded_migration(
         )
     ]
     monkeypatch.setattr(
-        "app.database.get_connection",
+        "app.migrations.get_connection",
         MagicMock(return_value=mock_conn),
     )
 
@@ -133,14 +134,14 @@ def test_create_tables_rejects_changed_applied_migration(
     """Verify migration checksums prevent editing an applied migration."""
     migration_path = tmp_path / "0001_create_example.sql"
     migration_path.write_text("SELECT 1;", encoding="utf-8")
-    monkeypatch.setattr("app.database.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("app.migrations.MIGRATIONS_DIR", tmp_path)
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
     mock_cursor.fetchall.return_value = [(1, "create_example", "wrong")]
     monkeypatch.setattr(
-        "app.database.get_connection",
+        "app.migrations.get_connection",
         MagicMock(return_value=mock_conn),
     )
 
@@ -159,14 +160,14 @@ def test_create_tables_rolls_back_and_closes_on_failure(
     """Verify migration failures roll back and still close the connection."""
     migration_path = tmp_path / "0001_create_example.sql"
     migration_path.write_text("SELECT 1;", encoding="utf-8")
-    monkeypatch.setattr("app.database.MIGRATIONS_DIR", tmp_path)
+    monkeypatch.setattr("app.migrations.MIGRATIONS_DIR", tmp_path)
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
     mock_cursor.execute.side_effect = RuntimeError("Migration failure")
     monkeypatch.setattr(
-        "app.database.get_connection",
+        "app.migrations.get_connection",
         MagicMock(return_value=mock_conn),
     )
 

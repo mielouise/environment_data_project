@@ -86,6 +86,7 @@ def test_save_measurements_success():
         (
             "DMI",
             1,
+            None,
             datetime(
                 2026,
                 10,
@@ -127,3 +128,19 @@ def test_close():
     repository.close()
 
     mock_conn.close.assert_called_once()
+def test_upsert_keeps_station_in_conflict_key():
+    conn = MagicMock()
+    repository = MeasurementRepository(conn)
+    repository.save_measurements([MeasurementDTO('DMI', 1, datetime.now(timezone.utc), 10, '06101')])
+    query, rows = conn.cursor.return_value.__enter__.return_value.executemany.call_args.args
+    assert 'station_id' in query.split('ON CONFLICT')[1].split('DO UPDATE')[0]
+    assert rows[0][2] == '06101'
+
+def test_save_station_metadata():
+    from app.models import StationDTO
+    conn = MagicMock()
+    MeasurementRepository(conn).save_stations([StationDTO('DMI', '06101', 'Station', 12, 55, {'status': 'Active'})])
+    query, rows = conn.cursor.return_value.__enter__.return_value.executemany.call_args.args
+    assert 'ON CONFLICT (source_id, station_id)' in query
+    assert rows[0][:5] == ('DMI', '06101', 'Station', 12, 55)
+    conn.commit.assert_called_once()

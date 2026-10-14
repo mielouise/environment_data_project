@@ -4,7 +4,8 @@ Implements the Repository pattern and encapsulates all database
 interaction logic for dimension tables and fact tables.
 """
 
-from app.transform import MeasurementDTO
+from app.models import MeasurementDTO, StationDTO
+from psycopg.types.json import Jsonb
 
 
 class MeasurementRepository:
@@ -86,14 +87,16 @@ class MeasurementRepository:
             INSERT INTO fact_measurements (
                 source_id,
                 parameter_id,
+                station_id,
                 timestamp,
                 value
             )
-            VALUES (%s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s)
 
             ON CONFLICT (
                 source_id,
                 parameter_id,
+                station_id,
                 timestamp
             )
             DO UPDATE SET
@@ -104,6 +107,7 @@ class MeasurementRepository:
             (
                 record.source_id,
                 record.parameter_id,
+                record.station_id,
                 record.timestamp,
                 record.value,
             )
@@ -116,6 +120,22 @@ class MeasurementRepository:
                 measurement_rows,
             )
 
+        self._conn.commit()
+
+    def save_stations(self, records: list[StationDTO]) -> None:
+        if not records:
+            return
+        with self._conn.cursor() as cursor:
+            cursor.executemany("""
+                INSERT INTO dim_stations (source_id, station_id, name, longitude, latitude, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source_id, station_id) DO UPDATE SET
+                    name = COALESCE(EXCLUDED.name, dim_stations.name),
+                    longitude = COALESCE(EXCLUDED.longitude, dim_stations.longitude),
+                    latitude = COALESCE(EXCLUDED.latitude, dim_stations.latitude),
+                    metadata = dim_stations.metadata || EXCLUDED.metadata;
+            """, [(r.source_id, r.station_id, r.name, r.longitude, r.latitude, Jsonb(r.metadata))
+                  for r in records])
         self._conn.commit()
 
     def close(self) -> None:

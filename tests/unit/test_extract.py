@@ -111,3 +111,30 @@ def test_dmi_data_source_fetch_http_failure(
 
     assert exc_info.value.__cause__ is underlying_error
     mock_response.json.assert_not_called()
+@patch('app.extract.dmi.requests.get')
+def test_pagination_preserves_filters_and_collects_all_pages(mock_get):
+    first, second = MagicMock(), MagicMock()
+    first.json.return_value = {'features': [{'id': 1}], 'links': [
+        {'rel': 'next', 'href': '?parameterId=temp_dry&offset=1'}]}
+    second.json.return_value = {'features': [{'id': 2}]}
+    mock_get.side_effect = [first, second]
+    source = DMIDataSource('DMI', 'DMI', 'https://example.test/items')
+    assert source.fetch({'parameterId': 'temp_dry'}) == {'features': [{'id': 1}, {'id': 2}]}
+    assert mock_get.call_args_list[0].kwargs['params'] == {'parameterId': 'temp_dry'}
+    assert 'params' not in mock_get.call_args_list[1].kwargs
+
+@patch('app.extract.dmi.requests.get')
+@pytest.mark.parametrize('href', ['https://evil.test/items', 'https://example.test/other', 'https://example.test/items'])
+def test_unsafe_or_repeating_next_page_rejected(mock_get, href):
+    mock_get.return_value.json.return_value = {'features': [], 'links': [{'rel': 'next', 'href': href}]}
+    source = DMIDataSource('DMI', 'DMI', 'https://example.test/items')
+    with pytest.raises(RuntimeError):
+        source.fetch()
+
+@patch('app.extract.dmi.requests.get')
+def test_station_endpoint_receives_only_station_filters(mock_get):
+    mock_get.return_value.json.return_value = {'features': []}
+    source = DMIDataSource('DMI', 'DMI', 'https://example.test/v2/metObs/collections/observation/items?api-key=test&parameterId=temp_dry')
+    source.fetch_stations({'stationId': '06101'})
+    mock_get.assert_called_once_with('https://example.test/v2/metObs/collections/station/items',
+                                    params={'api-key': 'test', 'stationId': '06101'}, timeout=10)
