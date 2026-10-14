@@ -52,13 +52,3 @@ def transform_measurements(raw_json: dict[str, Any], source_id: str) -> list[Mea
             result.append(measurement)
     return result
 
-
-class DMIDataTransformer:
-    """Backward-compatible facade for the existing transform API."""
-    PARAMETER_MAPPING = PARAMETER_MAPPING
-
-    def __init__(self, source_id: str) -> None:
-        self.source_id = source_id
-
-    def transform(self, raw_json: dict[str, Any]) -> list[MeasurementDTO]:
-        return transform_measurements(raw_json, self.source_id)
