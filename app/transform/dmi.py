@@ -62,6 +62,24 @@ PARAMETER_MAPPING: dict[str, ParameterIds] = {
 SUPPORTED_DMI_PARAMETER_IDS = tuple(PARAMETER_MAPPING)
 
 
+def _parse_observed_time(value: Any) -> datetime | None:
+    """Parse an API observation timestamp, returning None when invalid."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _parse_measurement_value(value: Any) -> float | None:
+    """Parse an API measurement value, returning None when invalid."""
+    try:
+        return float(value)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 def _transform_feature(
     feature: dict[str, Any],
     source_id: str,
@@ -90,22 +108,24 @@ def _transform_feature(
     if parameter_id is None:
         return None, "unsupported_parameter"
 
-    try:
-        timestamp = datetime.fromisoformat(observed_time)
-    except (ValueError, TypeError, AttributeError):
+    timestamp = _parse_observed_time(observed_time)
+    if timestamp is None:
         return None, "invalid_timestamp"
 
-    try:
-        measurement = MeasurementDTO(
+    parsed_value = _parse_measurement_value(value)
+    if parsed_value is None:
+        return None, "invalid_value"
+
+    return (
+        MeasurementDTO(
             source_id=source_id,
             station_id=str(station_id),
             parameter_id=parameter_id.value,
             timestamp=timestamp,
-            value=float(value),
-        )
-    except (ValueError, TypeError, AttributeError):
-        return None, "invalid_value"
-    return measurement, None
+            value=parsed_value,
+        ),
+        None,
+    )
 
 
 def transform_dmi_observations_with_report(

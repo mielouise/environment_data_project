@@ -6,6 +6,45 @@ from typing import Any
 from app.transform.models import StationDTO, TransformResult
 
 
+def _parse_coordinates(
+    geometry: Any,
+) -> tuple[float, float] | None:
+    """Parse and validate GeoJSON longitude and latitude."""
+    if not isinstance(geometry, dict):
+        return None
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, list) or len(coordinates) < 2:
+        return None
+    try:
+        longitude, latitude = float(coordinates[0]), float(coordinates[1])
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if not -180 <= longitude <= 180 or not -90 <= latitude <= 90:
+        return None
+    return longitude, latitude
+
+
+def _parse_station_height(properties: dict[str, Any]) -> float | None:
+    """Parse an optional station height, returning None when absent or invalid."""
+    height = properties.get("stationHeight")
+    if height is None:
+        return None
+    try:
+        return float(height)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _parse_valid_from(value: Any) -> datetime | None:
+    """Parse a station validity timestamp, returning None when invalid."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _transform_station(
     feature: dict[str, Any],
 ) -> tuple[StationDTO | None, str | None]:
@@ -20,43 +59,31 @@ def _transform_station(
     name = properties.get("name")
     station_type = properties.get("type")
     country_code = properties.get("country")
-    geometry = feature.get("geometry")
-    coordinates = (
-        geometry.get("coordinates")
-        if isinstance(
-            geometry,
-            dict,
-        )
-        else None
-    )
-    valid_from = properties.get("validFrom")
+    parsed_coordinates = _parse_coordinates(feature.get("geometry"))
+    valid_from = _parse_valid_from(properties.get("validFrom"))
 
     if (
         station_id is None
         or name is None
         or station_type is None
         or country_code is None
-        or not isinstance(coordinates, list)
-        or len(coordinates) < 2
-        or valid_from is None
     ):
         return None, "missing_required_fields"
 
-    try:
-        longitude, latitude = float(coordinates[0]), float(coordinates[1])
-        if not -180 <= longitude <= 180 or not -90 <= latitude <= 90:
-            return None, "invalid_coordinates"
-    except (ValueError, TypeError, AttributeError):
+    if parsed_coordinates is None:
         return None, "invalid_coordinates"
+    longitude, latitude = parsed_coordinates
 
-    try:
-        station_height = properties.get("stationHeight")
-        parsed_height = None if station_height is None else float(station_height)
-    except (ValueError, TypeError, AttributeError):
+    station_height = properties.get("stationHeight")
+    parsed_height = _parse_station_height(properties)
+    if station_height is not None and parsed_height is None:
         return None, "invalid_station_height"
 
-    try:
-        station = StationDTO(
+    if valid_from is None:
+        return None, "invalid_valid_from"
+
+    return (
+        StationDTO(
             station_id=str(station_id),
             name=str(name),
             station_type=str(station_type),
@@ -64,11 +91,10 @@ def _transform_station(
             latitude=latitude,
             longitude=longitude,
             station_height=parsed_height,
-            valid_from=datetime.fromisoformat(valid_from),
-        )
-    except (ValueError, TypeError, AttributeError):
-        return None, "invalid_valid_from"
-    return station, None
+            valid_from=valid_from,
+        ),
+        None,
+    )
 
 
 def transform_dmi_stations_with_report(
