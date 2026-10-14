@@ -108,15 +108,19 @@ def _log_transform_result(
 
     if expected_skips:
         logger.info(
-            "%s expected skips: %s",
+            "%s skipped %s of %s records for expected reasons: %s",
             stage,
+            sum(expected_skips.values()),
+            result.input_count,
             expected_skips,
         )
 
     if unexpected_skips:
         logger.warning(
-            "%s unexpected skips: %s",
+            "%s skipped %s of %s records due to unexpected issues: %s",
             stage,
+            sum(unexpected_skips.values()),
+            result.input_count,
             unexpected_skips,
         )
 

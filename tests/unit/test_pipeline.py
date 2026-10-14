@@ -82,7 +82,8 @@ def test_pipeline_logs_counts_and_reasons_for_skipped_records(
                     "observed": "2026-10-14T10:00:00Z",
                     "value": 1,
                 }
-            }
+            },
+            {"properties": {"parameterId": "temp_dry"}},
         ]
     }
     station_source = MagicMock()
@@ -107,8 +108,9 @@ def test_pipeline_logs_counts_and_reasons_for_skipped_records(
         == 0
     )
 
-    assert "DMI observations unexpected skips:" in caplog.text
+    assert "DMI observations skipped 2 of 2 records" in caplog.text
     assert "'unsupported_parameter': 1" in caplog.text
+    assert "'missing_required_fields': 1" in caplog.text
     assert "WARNING" in caplog.text
     repository.save_measurements.assert_called_once_with([])
 
@@ -167,7 +169,7 @@ def test_pipeline_logs_replaced_station_versions_as_info(
     deduplication_log = next(
         record
         for record in caplog.records
-        if "DMI stations expected skips:" in record.getMessage()
+        if "DMI stations skipped 1 of 2 records" in record.getMessage()
     )
     assert deduplication_log.levelname == "INFO"
     assert "'superseded_station_version': 1" in deduplication_log.message
