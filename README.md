@@ -596,3 +596,9 @@ The pre-existing dimension includes `temp_dry`, `humidity`, `humidity_past1h`, `
 Stations have geographical point coordinates, and observations reference their IDs. **Historical warning:** a station may change location or metadata over time. The present `dim_stations` table stores one record per station ID, so its coordinates represent the last loaded version, not a time-versioned history. For strict historical location accuracy, extend the schema to station versions with validity intervals and join observations by observation date.
 
 See the existing sections above for installation and the original database design, plus the newer relationships explained here.
+
+### DMI API capabilities and endpoints
+
+The [Capabilities API](https://python-dmi-open-data.readthedocs.io/en/latest/metobs/CapabilitiesApi/) describes collection discovery and service metadata, including `GET /v2/metObs/collections`, `GET /v2/metObs/collections/observation` and `GET /v2/metObs/collections/station`. These are **not** observation data endpoints. This ETL reads item data directly from the [MetObservationApi](https://python-dmi-open-data.readthedocs.io/en/latest/metobs/MetObservationApi/) and [MetStationApi](https://python-dmi-open-data.readthedocs.io/en/latest/metobs/MetStationApi/) endpoints (`.../items`), and needs no separate SDK dependency because existing code uses `requests`. The SDK examples describe optional `datetime`, `station_id`/`stationId`, `parameter_id`/`parameterId`, `limit` and `offset` filters; use the HTTP wire names `stationId` and `parameterId` in actual query strings.
+
+Parameter and collection availability can be explored through the capabilities endpoints, but parameter names must still be checked against DMI's meteorological observation catalog.
