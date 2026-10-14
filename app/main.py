@@ -1,4 +1,4 @@
-"""Application entry point for a one-shot or continuously scheduled DMI pipeline."""
+"""Run one DMI ingestion cycle or poll at a configurable interval."""
 import logging
 import os
 import sys
@@ -15,33 +15,46 @@ logger = logging.getLogger(__name__)
 
 
 def run_once() -> int:
-    """Run one cycle and close database connection even on failure."""
+    """Run migrations and one ETL cycle; always release the database connection."""
     url = os.environ.get("DMI_API_URL")
     if not url:
         raise RuntimeError("DMI_API_URL environment variable is missing.")
+    lookback = int(os.environ.get("DMI_LOOKBACK_MINUTES", "60"))
+    if lookback < 1:
+        raise ValueError("DMI_LOOKBACK_MINUTES must be positive")
     create_tables()
-    interval_minutes = int(os.environ.get("DMI_LOOKBACK_MINUTES", "60"))
-    start = datetime.now(timezone.utc) - timedelta(minutes=interval_minutes)
+
+    start = datetime.now(timezone.utc) - timedelta(minutes=lookback)
+    configured = os.environ.get("DMI_PARAMETER_IDS", "temp_dry,humidity")
+    parameters = [p.strip() for p in configured.split(",") if p.strip()]
+    if not parameters:
+        raise ValueError("DMI_PARAMETER_IDS requires at least one parameter")
     params = {
         "datetime": start.isoformat().replace("+00:00", "Z") + "/..",
         "limit": int(os.environ.get("DMI_PAGE_SIZE", "1000")),
+        "parameterIds": parameters,
     }
-    parameter = os.environ.get("DMI_PARAMETER_ID", "temp_dry")
-    if parameter:
-        params["parameterId"] = parameter
+    station_filter = os.environ.get("DMI_STATION_ID")
+    if station_filter:
+        params["stationId"] = station_filter
 
-    station_ids = os.environ.get("DMI_STATION_ID")
-    if station_ids:
-        params["stationId"] = station_ids
     source = DMIDataSource("DMI", "DMI Observation API", url)
-    station_url = os.environ.get(
-        "DMI_STATIONS_URL", "https://opendataapi.dmi.dk/v2/metObs/collections/station/items"
-    )
-    station_source = DMIStationSource("DMI_STATIONS", "DMI Station API", station_url)
+    station_source = None
+    if os.environ.get("DMI_FETCH_STATIONS", "true").lower() in ("1", "true", "yes"):
+        station_source = DMIStationSource(
+            "DMI_STATIONS", "DMI Station API",
+            os.environ.get(
+                "DMI_STATIONS_URL",
+                "https://opendataapi.dmi.dk/v2/metObs/collections/station/items",
+            ),
+        )
+
     connection = get_db_connection()
     try:
-        repo = MeasurementRepository(connection)
-        return run_weather_pipeline(source, repo, station_source=station_source, params=params)
+        return run_weather_pipeline(
+            source, MeasurementRepository(connection),
+            station_source=station_source, params=params,
+        )
     except Exception:
         connection.rollback()
         raise
@@ -50,7 +63,7 @@ def run_once() -> int:
 
 
 def main() -> None:
-    """Run once by default; enable polling with DMI_POLL_SECONDS."""
+    """Run once by default. Set DMI_POLL_SECONDS to poll continuously."""
     logging.basicConfig(level=logging.INFO)
     try:
         seconds = int(os.environ.get("DMI_POLL_SECONDS", "0"))
