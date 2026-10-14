@@ -6,7 +6,7 @@ import pytest
 
 from app.constants.parameters import ParameterIds
 from app.transform import (
-    DMIDataTransformer,
+    transform_measurements,
     MeasurementDTO,
 )
 
@@ -14,9 +14,6 @@ from app.transform import (
 def test_transform_temperature() -> None:
     """Verify temp_dry observations are transformed."""
 
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
 
     raw_json = {
         "features": [
@@ -30,7 +27,7 @@ def test_transform_temperature() -> None:
         ]
     }
 
-    results = transformer.transform(raw_json)
+    results = transform_measurements(raw_json, "DMI")
 
     assert len(results) == 1
 
@@ -50,9 +47,6 @@ def test_transform_temperature() -> None:
 def test_transform_humidity() -> None:
     """Verify humidity observations are transformed."""
 
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
 
     raw_json = {
         "features": [
@@ -66,7 +60,7 @@ def test_transform_humidity() -> None:
         ]
     }
 
-    results = transformer.transform(raw_json)
+    results = transform_measurements(raw_json, "DMI")
 
     assert len(results) == 1
 
@@ -83,9 +77,6 @@ def test_transform_humidity() -> None:
 def test_transform_humidity_past_1h() -> None:
     """Verify humidity_past1h maps correctly."""
 
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
 
     raw_json = {
         "features": [
@@ -99,7 +90,7 @@ def test_transform_humidity_past_1h() -> None:
         ]
     }
 
-    results = transformer.transform(raw_json)
+    results = transform_measurements(raw_json, "DMI")
 
     assert len(results) == 1
 
@@ -112,21 +103,17 @@ def test_transform_humidity_past_1h() -> None:
 @pytest.mark.parametrize("parameter_name", ["co2", "pm25"])
 def test_air_quality_parameters_are_not_metobs_observations(parameter_name):
     """These measurements are not part of the selected metObs collection."""
-    transformer = DMIDataTransformer(source_id="DMI")
     payload = {"features": [{"properties": {
         "parameterId": parameter_name,
         "observed": "2026-10-09T10:00:00Z",
         "value": 42.5,
     }}]}
-    assert transformer.transform(payload) == []
+    assert transform_measurements(payload, "DMI") == []
 
 
 def test_transform_unknown_parameter() -> None:
     """Verify unsupported parameters are ignored."""
 
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
 
     raw_json = {
         "features": [
@@ -140,7 +127,7 @@ def test_transform_unknown_parameter() -> None:
         ]
     }
 
-    results = transformer.transform(raw_json)
+    results = transform_measurements(raw_json, "DMI")
 
     assert results == []
 
@@ -148,9 +135,6 @@ def test_transform_unknown_parameter() -> None:
 def test_transform_missing_value() -> None:
     """Verify observations without value are ignored."""
 
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
 
     raw_json = {
         "features": [
@@ -164,7 +148,7 @@ def test_transform_missing_value() -> None:
         ]
     }
 
-    results = transformer.transform(raw_json)
+    results = transform_measurements(raw_json, "DMI")
 
     assert results == []
 
@@ -172,7 +156,6 @@ def test_transform_missing_value() -> None:
 def test_transform_missing_required_observation_fields() -> None:
     """Verify observations missing their parameter or timestamp are ignored."""
 
-    transformer = DMIDataTransformer(source_id="DMI")
     raw_json = {
         "features": [
             {
@@ -190,15 +173,12 @@ def test_transform_missing_required_observation_fields() -> None:
         ]
     }
 
-    assert transformer.transform(raw_json) == []
+    assert transform_measurements(raw_json, "DMI") == []
 
 
 def test_transform_invalid_timestamp() -> None:
     """Verify invalid timestamps are ignored."""
 
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
 
     raw_json = {
         "features": [
@@ -212,7 +192,7 @@ def test_transform_invalid_timestamp() -> None:
         ]
     }
 
-    results = transformer.transform(raw_json)
+    results = transform_measurements(raw_json, "DMI")
 
     assert results == []
 
@@ -220,7 +200,6 @@ def test_transform_invalid_timestamp() -> None:
 def test_transform_invalid_numeric_value() -> None:
     """Verify values that cannot be converted to floats are ignored."""
 
-    transformer = DMIDataTransformer(source_id="DMI")
     raw_json = {
         "features": [
             {
@@ -233,15 +212,12 @@ def test_transform_invalid_numeric_value() -> None:
         ]
     }
 
-    assert transformer.transform(raw_json) == []
+    assert transform_measurements(raw_json, "DMI") == []
 
 
 def test_transform_multiple_observations() -> None:
     """Verify multiple observations are transformed."""
 
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
 
     raw_json = {
         "features": [
@@ -262,7 +238,7 @@ def test_transform_multiple_observations() -> None:
         ]
     }
 
-    results = transformer.transform(raw_json)
+    results = transform_measurements(raw_json, "DMI")
 
     assert len(results) == 2
 
