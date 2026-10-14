@@ -13,7 +13,7 @@ The pipeline performs the following steps:
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
 
@@ -57,7 +57,7 @@ def _build_datetime_range(
     Example:
         2026-10-14T10:00:00Z/2026-10-15T10:00:00Z
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     since = now - timedelta(
         hours=lookback_hours,
@@ -187,22 +187,14 @@ def run_dmi_pipeline(
             If invalid parameters are supplied.
     """
     if lookback_hours <= 0:
-        raise ValueError(
-            "lookback_hours must be greater than zero."
-        )
+        raise ValueError("lookback_hours must be greater than zero.")
 
     if not parameter_ids:
-        raise ValueError(
-            "At least one DMI parameter must be selected."
-        )
+        raise ValueError("At least one DMI parameter must be selected.")
 
-    datetime_range = _build_datetime_range(
-        lookback_hours
-    )
+    datetime_range = _build_datetime_range(lookback_hours)
 
-    logger.info(
-        "Fetching station metadata."
-    )
+    logger.info("Fetching station metadata.")
 
     station_data = station_source.fetch(
         params={
@@ -211,11 +203,7 @@ def run_dmi_pipeline(
         }
     )
 
-    station_result = (
-        transform_dmi_stations_with_report(
-            station_data
-        )
-    )
+    station_result = transform_dmi_stations_with_report(station_data)
 
     _log_transform_result(
         "DMI stations",
@@ -236,7 +224,6 @@ def run_dmi_pipeline(
     with ThreadPoolExecutor(
         max_workers=MAX_CONCURRENT_PARAMETER_REQUESTS,
     ) as executor:
-
         observation_features = [
             feature
             for features in executor.map(
@@ -251,11 +238,9 @@ def run_dmi_pipeline(
         len(observation_features),
     )
 
-    measurement_result = (
-        transform_dmi_observations_with_report(
-            {"features": observation_features},
-            source_id=observation_source.source_id,
-        )
+    measurement_result = transform_dmi_observations_with_report(
+        {"features": observation_features},
+        source_id=observation_source.source_id,
     )
 
     _log_transform_result(
@@ -274,10 +259,7 @@ def run_dmi_pipeline(
 
     try:
         with connection.transaction():
-
-            repository = MeasurementRepository(
-                connection
-            )
+            repository = MeasurementRepository(connection)
 
             repository.save_source(
                 source_id=observation_source.source_id,
@@ -285,13 +267,9 @@ def run_dmi_pipeline(
                 source_type="API_DMI",
             )
 
-            repository.save_stations(
-                station_result.records
-            )
+            repository.save_stations(station_result.records)
 
-            repository.save_measurements(
-                measurements
-            )
+            repository.save_measurements(measurements)
 
     finally:
         connection.close()

@@ -91,9 +91,7 @@ def _transform_feature(
         return None, "unsupported_parameter"
 
     try:
-        timestamp = datetime.fromisoformat(
-            observed_time.replace("Z", "+00:00")
-        )
+        timestamp = datetime.fromisoformat(observed_time)
     except (ValueError, TypeError, AttributeError):
         return None, "invalid_timestamp"
 
@@ -121,9 +119,7 @@ def transform_dmi_observations_with_report(
         measurement, reason = _transform_feature(feature, source_id)
         if measurement is None:
             if reason is None:
-                raise RuntimeError(
-                    "Skipped observation transformation has no reason."
-                )
+                raise RuntimeError("Skipped observation transformation has no reason.")
             skipped[reason] = skipped.get(reason, 0) + 1
         else:
             measurements.append(measurement)

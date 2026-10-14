@@ -1,6 +1,6 @@
 """Unit tests for the DMI pipeline."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Barrier, current_thread
 from unittest.mock import MagicMock
 
@@ -28,11 +28,14 @@ def test_pipeline_extracts_transforms_and_persists_measurements(monkeypatch):
         MagicMock(return_value=repository),
     )
 
-    assert run_dmi_pipeline(
-        observation_source,
-        station_source,
-        ("temp_dry", "humidity"),
-    ) == 0
+    assert (
+        run_dmi_pipeline(
+            observation_source,
+            station_source,
+            ("temp_dry", "humidity"),
+        )
+        == 0
+    )
 
     station_source.fetch.assert_called_once_with(
         params={
@@ -95,11 +98,14 @@ def test_pipeline_logs_counts_and_reasons_for_skipped_records(
         MagicMock(return_value=repository),
     )
 
-    assert run_dmi_pipeline(
-        observation_source,
-        station_source,
-        ("temp_dry",),
-    ) == 0
+    assert (
+        run_dmi_pipeline(
+            observation_source,
+            station_source,
+            ("temp_dry",),
+        )
+        == 0
+    )
 
     assert "DMI observations unexpected skips:" in caplog.text
     assert "'unsupported_parameter': 1" in caplog.text
@@ -166,8 +172,7 @@ def test_pipeline_logs_replaced_station_versions_as_info(
     assert deduplication_log.levelname == "INFO"
     assert "'superseded_station_version': 1" in deduplication_log.message
     assert not any(
-        record.levelname == "WARNING"
-        and "DMI stations" in record.getMessage()
+        record.levelname == "WARNING" and "DMI stations" in record.getMessage()
         for record in caplog.records
     )
     repository.save_stations.assert_called_once()
@@ -288,11 +293,14 @@ def test_pipeline_links_observations_to_persisted_station_metadata(
         MagicMock(return_value=repository),
     )
 
-    assert run_dmi_pipeline(
-        observation_source,
-        station_source,
-        ("temp_dry",),
-    ) == 1
+    assert (
+        run_dmi_pipeline(
+            observation_source,
+            station_source,
+            ("temp_dry",),
+        )
+        == 1
+    )
 
     repository.save_stations.assert_called_once()
     assert repository.save_stations.call_args.args[0][0] == StationDTO(
@@ -303,7 +311,7 @@ def test_pipeline_links_observations_to_persisted_station_metadata(
         latitude=55.723,
         longitude=8.3327,
         station_height=18.0,
-        valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        valid_from=datetime(2026, 1, 1, tzinfo=UTC),
     )
     repository.save_measurements.assert_called_once()
     assert repository.save_measurements.call_args.args[0] == [
@@ -311,7 +319,7 @@ def test_pipeline_links_observations_to_persisted_station_metadata(
             source_id="DMI",
             station_id="05329",
             parameter_id=1,
-            timestamp=datetime(2026, 10, 14, 10, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 10, 14, 10, 0, tzinfo=UTC),
             value=12.5,
         )
     ]
@@ -347,7 +355,6 @@ def test_pipeline_rolls_back_and_closes_connection_when_loading_fails(
 
     connection.transaction.return_value.__exit__.assert_called_once()
     assert (
-        connection.transaction.return_value.__exit__.call_args.args[0]
-        is RuntimeError
+        connection.transaction.return_value.__exit__.call_args.args[0] is RuntimeError
     )
     connection.close.assert_called_once_with()

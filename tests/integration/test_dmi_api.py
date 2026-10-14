@@ -1,7 +1,7 @@
 """Integration tests for the DMI Observation API."""
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.extract import DMIDataSource
 from app.extract.dmi import build_dmi_collection_url
@@ -19,7 +19,7 @@ def test_dmi_api_connection():
         ),
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     start = now - timedelta(minutes=5)
     response = source.fetch(
         params={

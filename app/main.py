@@ -2,7 +2,6 @@
 
 import os
 import sys
-from functools import partial
 
 from app.extract import DMIDataSource
 from app.extract.dmi import build_dmi_collection_url
@@ -63,21 +62,17 @@ def main() -> None:
         parameter_ids = _configured_parameter_ids()
         apply_migrations()
 
-        run_pipeline = partial(
-            run_dmi_pipeline,
+        measurement_count = run_dmi_pipeline(
             observation_source=source,
             station_source=station_source,
             parameter_ids=parameter_ids,
         )
-
-        measurement_count = run_pipeline()
         print(
-            "ETL cycle completed: "
-            f"{measurement_count} observations processed.",
+            f"ETL cycle completed: {measurement_count} observations processed.",
             flush=True,
         )
         print("=== ETL Pipeline Completed ===")
-    except Exception as err:
+    except Exception as err:  # noqa: BLE001 - CLI boundary reports run failures.
         print(
             f"Pipeline execution failed: {err}",
             file=sys.stderr,

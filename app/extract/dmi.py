@@ -1,6 +1,7 @@
 """DMI Observation API data source."""
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
@@ -10,7 +11,10 @@ from app.extract.base import SensorDataSource
 DMI_COLLECTIONS_PATH = "/v2/metObs/collections"
 
 
-def build_dmi_collection_url(api_base_url: str, collection: str) -> str:
+def build_dmi_collection_url(
+    api_base_url: str,
+    collection: Literal["observation", "station"],
+) -> str:
     """Build a versioned DMI collection endpoint from its API base URL.
 
     A previously configured collection endpoint is normalized back to its
@@ -33,13 +37,10 @@ def build_dmi_collection_url(api_base_url: str, collection: str) -> str:
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
         raise ValueError("DMI API base URL must be an absolute HTTP(S) URL.")
     if parsed_url.query or parsed_url.fragment:
-        raise ValueError(
-            "DMI API base URL must not contain a query or fragment."
-        )
+        raise ValueError("DMI API base URL must not contain a query or fragment.")
     base_path = parsed_url.path.rstrip("/")
     endpoint_suffixes = (
-        f"{DMI_COLLECTIONS_PATH}/{name}/items"
-        for name in ("observation", "station")
+        f"{DMI_COLLECTIONS_PATH}/{name}/items" for name in ("observation", "station")
     )
     for suffix in (*endpoint_suffixes, DMI_COLLECTIONS_PATH):
         if base_path.endswith(suffix):
@@ -55,10 +56,7 @@ def build_dmi_collection_url(api_base_url: str, collection: str) -> str:
             "",
         )
     )
-    return (
-        f"{normalized_base_url}"
-        f"{DMI_COLLECTIONS_PATH}/{collection}/items"
-    )
+    return f"{normalized_base_url}{DMI_COLLECTIONS_PATH}/{collection}/items"
 
 
 class DMIDataSource(SensorDataSource):
@@ -66,12 +64,7 @@ class DMIDataSource(SensorDataSource):
 
     REQUEST_TIMEOUT_SECONDS = 10
 
-    def __init__(
-        self,
-        source_id: str,
-        source_name: str,
-        url: str
-    ) -> None:
+    def __init__(self, source_id: str, source_name: str, url: str) -> None:
         """Initialize the DMI data source.
 
         Args:
@@ -84,10 +77,7 @@ class DMIDataSource(SensorDataSource):
             url:
                 DMI Observation API endpoint URL.
         """
-        super().__init__(
-            source_id=source_id,
-            source_name=source_name
-        )
+        super().__init__(source_id=source_id, source_name=source_name)
 
         self.url = url
 
@@ -126,9 +116,7 @@ class DMIDataSource(SensorDataSource):
                 if not isinstance(page, dict) or not isinstance(
                     page.get("features"), list
                 ):
-                    raise RuntimeError(
-                        "DMI API response must contain a features list."
-                    )
+                    raise RuntimeError("DMI API response must contain a features list.")
 
                 if first_page is None:
                     first_page = page
@@ -145,16 +133,12 @@ class DMIDataSource(SensorDataSource):
                 if next_url is None:
                     break
                 if next_url in visited_urls:
-                    raise RuntimeError(
-                        "DMI API returned a repeated pagination link."
-                    )
+                    raise RuntimeError("DMI API returned a repeated pagination link.")
                 visited_urls.add(next_url)
                 page_url = next_url
                 page_params = None
         except requests.RequestException as err:
-            raise RuntimeError(
-                f"Failed to retrieve DMI data: {err}"
-            ) from err
+            raise RuntimeError(f"Failed to retrieve DMI data: {err}") from err
 
         if first_page is None:
             raise RuntimeError("DMI API returned no response pages.")

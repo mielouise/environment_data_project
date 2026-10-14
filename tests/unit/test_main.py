@@ -33,14 +33,9 @@ def test_main_pipeline_success(
     assert mock_source_cls.call_args_list[0].kwargs == {
         "source_id": "DMI",
         "source_name": "DMI Observation API",
-        "url": (
-            "http://fake-url.com/v2/metObs/collections/"
-            "observation/items"
-        ),
+        "url": ("http://fake-url.com/v2/metObs/collections/observation/items"),
     }
-    assert mock_source_cls.call_args_list[1].kwargs["source_id"] == (
-        "DMI_STATIONS"
-    )
+    assert mock_source_cls.call_args_list[1].kwargs["source_id"] == ("DMI_STATIONS")
     assert mock_source_cls.call_args_list[1].kwargs["url"] == (
         "http://fake-url.com/v2/metObs/collections/station/items"
     )
@@ -49,9 +44,7 @@ def test_main_pipeline_success(
         station_source=mock_station_source,
         parameter_ids=DEFAULT_DMI_PARAMETER_IDS,
     )
-    assert "ETL cycle completed: 2 observations processed." in (
-        capsys.readouterr().out
-    )
+    assert "ETL cycle completed: 2 observations processed." in (capsys.readouterr().out)
 
 
 @patch("app.main.apply_migrations")
@@ -62,6 +55,7 @@ def test_main_pipeline_database_initialization_failure(mock_apply_migrations):
         main()
 
     assert exc_info.value.code == 1
+
 
 @patch("app.main.apply_migrations")
 def test_main_requires_dmi_api_url(

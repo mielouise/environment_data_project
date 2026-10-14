@@ -1,6 +1,6 @@
 """Unit tests for the transformation functions."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -35,7 +35,7 @@ def test_transform_temperature():
             source_id="DMI",
             station_id="05329",
             parameter_id=ParameterIds.TEMPERATURE.value,
-            timestamp=datetime(2026, 10, 9, 10, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 10, 9, 10, 0, tzinfo=UTC),
             value=15.5,
         )
     ]
@@ -64,8 +64,7 @@ def test_transform_supported_parameters(
 
 def test_transform_all_documented_dmi_parameters():
     features = [
-        _observation(parameter_name, value="1")
-        for parameter_name in PARAMETER_MAPPING
+        _observation(parameter_name, value="1") for parameter_name in PARAMETER_MAPPING
     ]
 
     results = transform_dmi_observations(
@@ -74,9 +73,7 @@ def test_transform_all_documented_dmi_parameters():
     )
 
     assert len(results) == len(PARAMETER_MAPPING)
-    assert {
-        result.parameter_id for result in results
-    } == {
+    assert {result.parameter_id for result in results} == {
         parameter.value for parameter in PARAMETER_MAPPING.values()
     }
 
@@ -109,10 +106,13 @@ def test_transform_categorical_dmi_codes_as_numeric_values():
     ],
 )
 def test_unsupported_or_invalid_observations_are_skipped(feature):
-    assert transform_dmi_observations(
-        {"features": [feature]},
-        source_id="DMI",
-    ) == []
+    assert (
+        transform_dmi_observations(
+            {"features": [feature]},
+            source_id="DMI",
+        )
+        == []
+    )
 
 
 def test_observation_transform_report_counts_skips_by_reason():

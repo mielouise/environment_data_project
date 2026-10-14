@@ -2,13 +2,10 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Generic, TypeVar
-
-RecordT = TypeVar("RecordT")
 
 
 @dataclass(frozen=True)
-class TransformResult(Generic[RecordT]):
+class TransformResult[RecordT]:
     """Transformed records and counts grouped by skip reason."""
 
     records: list[RecordT]

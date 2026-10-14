@@ -1,7 +1,8 @@
 """Base abstraction for environmental data sources."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 class SensorDataSource(ABC):
@@ -11,11 +12,7 @@ class SensorDataSource(ABC):
     fetch method to return raw data.
     """
 
-    def __init__(
-        self,
-        source_id: str,
-        source_name: str
-    ) -> None:
+    def __init__(self, source_id: str, source_name: str) -> None:
         """Initialize the data source.
 
         Args:

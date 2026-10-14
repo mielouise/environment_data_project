@@ -195,6 +195,13 @@ way.
 
 ### Testing
 
+Check Python linting and formatting:
+
+```bash
+python -m ruff check app tests
+python -m ruff format --check app tests
+```
+
 Run the complete test suite, including the unit tests and integration tests:
 
 ```bash

@@ -1,7 +1,6 @@
 """PostgreSQL connection utilities."""
 
 import os
-import sys
 from typing import Any
 
 import psycopg
@@ -9,30 +8,21 @@ from psycopg import Connection
 
 
 def get_connection() -> Connection[Any]:
-    """Create and return a PostgreSQL database connection.
+    """Create a PostgreSQL connection using the configured environment.
 
     Returns:
         Active PostgreSQL connection.
 
     Raises:
-        Exception:
-            Raised if connection establishment fails.
+        psycopg.Error: If the database connection cannot be established.
     """
-    try:
-        return psycopg.connect(
-            host=os.environ.get("POSTGRES_HOST", "db"),
-            dbname=os.environ.get("POSTGRES_DB", "postgres_db"),
-            user=os.environ.get("POSTGRES_USER", "admin"),
-            password=os.environ.get("POSTGRES_PASSWORD", "password"),
-            port=os.environ.get("POSTGRES_PORT", "5432"),
-        )
-
-    except Exception as err:
-        print(
-            f"Database connection establishment failed: {err}",
-            file=sys.stderr
-        )
-        raise
+    return psycopg.connect(
+        host=os.environ.get("POSTGRES_HOST", "db"),
+        dbname=os.environ.get("POSTGRES_DB", "postgres_db"),
+        user=os.environ.get("POSTGRES_USER", "admin"),
+        password=os.environ.get("POSTGRES_PASSWORD", "password"),
+        port=os.environ.get("POSTGRES_PORT", "5432"),
+    )
 
 
 def get_db_connection() -> Connection[Any]:

@@ -1,8 +1,8 @@
 """Unit tests for the repository layer."""
 
 from datetime import (
+    UTC,
     datetime,
-    timezone,
 )
 from unittest.mock import MagicMock
 
@@ -17,19 +17,11 @@ def test_save_source():
 
     mock_cursor = MagicMock()
 
-    mock_conn.cursor.return_value.__enter__.return_value = (
-        mock_cursor
-    )
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
 
-    repository = MeasurementRepository(
-        db_connection=mock_conn
-    )
+    repository = MeasurementRepository(db_connection=mock_conn)
 
-    repository.save_source(
-        "SOURCE-01",
-        "Sensor Name",
-        "API_DMI"
-    )
+    repository.save_source("SOURCE-01", "Sensor Name", "API_DMI")
 
     mock_cursor.execute.assert_called_once()
     query, parameters = mock_cursor.execute.call_args.args
@@ -51,32 +43,19 @@ def test_save_measurements_success():
 
     mock_cursor = MagicMock()
 
-    mock_conn.cursor.return_value.__enter__.return_value = (
-        mock_cursor
-    )
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
 
-    repository = MeasurementRepository(
-        db_connection=mock_conn
-    )
+    repository = MeasurementRepository(db_connection=mock_conn)
 
     measurement = MeasurementDTO(
         source_id="DMI",
         station_id="05329",
         parameter_id=1,
-        timestamp=datetime(
-            2026,
-            10,
-            5,
-            12,
-            0,
-            tzinfo=timezone.utc
-        ),
-        value=15.0
+        timestamp=datetime(2026, 10, 5, 12, 0, tzinfo=UTC),
+        value=15.0,
     )
 
-    repository.save_measurements(
-        [measurement]
-    )
+    repository.save_measurements([measurement])
 
     mock_cursor.executemany.assert_called_once()
     query, rows = mock_cursor.executemany.call_args.args
@@ -88,14 +67,7 @@ def test_save_measurements_success():
             "DMI",
             "05329",
             1,
-            datetime(
-                2026,
-                10,
-                5,
-                12,
-                0,
-                tzinfo=timezone.utc
-            ),
+            datetime(2026, 10, 5, 12, 0, tzinfo=UTC),
             15.0,
         )
     ]
@@ -108,9 +80,7 @@ def test_save_measurements_empty():
 
     mock_conn = MagicMock()
 
-    repository = MeasurementRepository(
-        db_connection=mock_conn
-    )
+    repository = MeasurementRepository(db_connection=mock_conn)
 
     repository.save_measurements([])
 
@@ -130,7 +100,7 @@ def test_save_stations_upserts_latest_station_location():
         latitude=55.723,
         longitude=8.3327,
         station_height=18.0,
-        valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        valid_from=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     repository.save_stations([station])
@@ -149,7 +119,7 @@ def test_save_stations_upserts_latest_station_location():
             55.723,
             8.3327,
             18.0,
-            datetime(2026, 1, 1, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, tzinfo=UTC),
         )
     ]
     mock_conn.commit.assert_not_called()

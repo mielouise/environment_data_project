@@ -21,10 +21,14 @@ def _transform_station(
     station_type = properties.get("type")
     country_code = properties.get("country")
     geometry = feature.get("geometry")
-    coordinates = geometry.get("coordinates") if isinstance(
-        geometry,
-        dict,
-    ) else None
+    coordinates = (
+        geometry.get("coordinates")
+        if isinstance(
+            geometry,
+            dict,
+        )
+        else None
+    )
     valid_from = properties.get("validFrom")
 
     if (
@@ -47,9 +51,7 @@ def _transform_station(
 
     try:
         station_height = properties.get("stationHeight")
-        parsed_height = (
-            None if station_height is None else float(station_height)
-        )
+        parsed_height = None if station_height is None else float(station_height)
     except (ValueError, TypeError, AttributeError):
         return None, "invalid_station_height"
 
@@ -62,9 +64,7 @@ def _transform_station(
             latitude=latitude,
             longitude=longitude,
             station_height=parsed_height,
-            valid_from=datetime.fromisoformat(
-                valid_from.replace("Z", "+00:00")
-            ),
+            valid_from=datetime.fromisoformat(valid_from),
         )
     except (ValueError, TypeError, AttributeError):
         return None, "invalid_valid_from"
@@ -81,9 +81,7 @@ def transform_dmi_stations_with_report(
         station, reason = _transform_station(feature)
         if station is None:
             if reason is None:
-                raise RuntimeError(
-                    "Skipped station transformation has no reason."
-                )
+                raise RuntimeError("Skipped station transformation has no reason.")
             skipped[reason] = skipped.get(reason, 0) + 1
             continue
         current = stations_by_id.get(station.station_id)

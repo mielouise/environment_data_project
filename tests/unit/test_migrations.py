@@ -1,8 +1,8 @@
 """Unit tests for migration discovery and execution."""
 
+import re
 from hashlib import sha256
 from pathlib import Path
-import re
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -63,9 +63,7 @@ def test_apply_migrations_applies_and_records_pending_migration(
     executed_calls = mock_cursor.execute.call_args_list
     assert len(executed_calls) == 5
     assert "pg_advisory_xact_lock" in executed_calls[0].args[0]
-    assert "CREATE TABLE IF NOT EXISTS schema_migrations" in (
-        executed_calls[1].args[0]
-    )
+    assert "CREATE TABLE IF NOT EXISTS schema_migrations" in (executed_calls[1].args[0])
     assert "SELECT version, name, checksum" in executed_calls[2].args[0]
     assert executed_calls[3] == call(migration_sql)
     assert "INSERT INTO schema_migrations" in executed_calls[4].args[0]

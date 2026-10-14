@@ -7,18 +7,14 @@ from pathlib import Path
 from app.database import get_connection
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
-MIGRATION_FILENAME_PATTERN = re.compile(
-    r"^(?P<version>\d+)_(?P<name>[a-z0-9_]+)\.sql$"
-)
+MIGRATION_FILENAME_PATTERN = re.compile(r"^(?P<version>\d+)_(?P<name>[a-z0-9_]+)\.sql$")
 
 
 def apply_migrations() -> None:
     """Apply pending database migrations in version order."""
     migrations = []
     for migration_path in MIGRATIONS_DIR.glob("*.sql"):
-        match = MIGRATION_FILENAME_PATTERN.fullmatch(
-            migration_path.name
-        )
+        match = MIGRATION_FILENAME_PATTERN.fullmatch(migration_path.name)
         if match is None:
             raise ValueError(
                 "Invalid migration filename "
@@ -67,8 +63,7 @@ def apply_migrations() -> None:
             }
             available_migrations = {
                 version: (name, migration_checksum, migration_sql)
-                for version, name, migration_sql, migration_checksum
-                in migrations
+                for version, name, migration_sql, migration_checksum in migrations
             }
 
             for version, (name, checksum) in applied_migrations.items():
