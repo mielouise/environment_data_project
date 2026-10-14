@@ -109,37 +109,16 @@ def test_transform_humidity_past_1h() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("parameter_name", "expected_parameter_id"),
-    [
-        ("co2", ParameterIds.CO2),
-        ("pm25", ParameterIds.PM25),
-    ],
-)
-def test_transform_additional_supported_parameters(
-    parameter_name,
-    expected_parameter_id,
-):
-    """Verify all currently supported parameter IDs are mapped."""
-
+@pytest.mark.parametrize("parameter_name", ["co2", "pm25"])
+def test_air_quality_parameters_are_not_metobs_observations(parameter_name):
+    """These measurements are not part of the selected metObs collection."""
     transformer = DMIDataTransformer(source_id="DMI")
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": parameter_name,
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": "42.5",
-                }
-            }
-        ]
-    }
-
-    results = transformer.transform(raw_json)
-
-    assert len(results) == 1
-    assert results[0].parameter_id == expected_parameter_id
-    assert results[0].value == 42.5
+    payload = {"features": [{"properties": {
+        "parameterId": parameter_name,
+        "observed": "2026-10-09T10:00:00Z",
+        "value": 42.5,
+    }}]}
+    assert transformer.transform(payload) == []
 
 
 def test_transform_unknown_parameter() -> None:
