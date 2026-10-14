@@ -19,8 +19,6 @@ PARAMETER_MAPPING = {
     "temp_dry": ParameterIds.TEMPERATURE,
     "humidity": ParameterIds.HUMIDITY,
     "humidity_past1h": ParameterIds.HUMIDITY_PAST_1H,
-    "co2": ParameterIds.CO2,
-    "pm25": ParameterIds.PM25,
 }
 
 
