@@ -1,51 +1,19 @@
-"""ETL orchestration service.
-
-Coordinates the complete Extract, Transform, and Load workflow.
-"""
-
-from app.extract import SensorDataSource
-from app.load import MeasurementRepository
-from app.transform import (
-    DMIDataTransformer,
-    MeasurementDTO,
-)
+"""Legacy compatibility facade. Prefer app.pipelines.weather_pipeline."""
+from app.transform import DMIDataTransformer
 
 
 class ETLService:
-    """Execute environmental ETL pipeline."""
-
-    def __init__(
-        self,
-        source: SensorDataSource,
-        transformer: DMIDataTransformer,
-        repository: MeasurementRepository
-    ) -> None:
-        """Initialize ETL service."""
+    """Backward-compatible adapter; new pipelines use a plain function."""
+    def __init__(self, source, transformer, repository):
         self._source = source
         self._transformer = transformer
         self._repository = repository
 
-    def run(self) -> int:
-        """Run the ETL pipeline.
-
-        Returns:
-            Number of measurements processed.
-        """
-
-        raw_data = self._source.fetch()
-
-        measurements: list[MeasurementDTO] = (
-            self._transformer.transform(raw_data)
-        )
-
+    def run(self):
+        raw = self._source.fetch()
+        rows = self._transformer.transform(raw)
         self._repository.save_source(
-            source_id=self._source.source_id,
-            source_name=self._source.source_name,
-            source_type="API_DMI"
+            self._source.source_id, self._source.source_name, "API_DMI"
         )
-
-        self._repository.save_measurements(
-            measurements
-        )
-
-        return len(measurements)
+        self._repository.save_measurements(rows)
+        return len(rows)
