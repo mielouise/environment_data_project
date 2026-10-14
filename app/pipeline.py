@@ -20,6 +20,7 @@ DEFAULT_LOOKBACK_HOURS = 24
 DEFAULT_PAGE_SIZE = 1000
 MAX_CONCURRENT_PARAMETER_REQUESTS = 5
 logger = logging.getLogger(__name__)
+EXPECTED_SKIP_REASONS = {"superseded_station_version"}
 
 
 def _log_transform_result(
@@ -27,26 +28,50 @@ def _log_transform_result(
     result: TransformResult[Any],
 ) -> None:
     """Log transformed and skipped record counts for one ETL stage."""
-    skipped_count = sum(result.skipped.values())
-    if result.skipped:
+    expected_skips = {
+        reason: count
+        for reason, count in result.skipped.items()
+        if reason in EXPECTED_SKIP_REASONS
+    }
+    unexpected_skips = {
+        reason: count
+        for reason, count in result.skipped.items()
+        if reason not in EXPECTED_SKIP_REASONS
+    }
+
+    if expected_skips:
         reasons = ", ".join(
             f"{reason}={count}"
-            for reason, count in sorted(result.skipped.items())
+            for reason, count in sorted(expected_skips.items())
+        )
+        logger.info(
+            "%s transformation deduplicated %s expected records: %s",
+            stage,
+            sum(expected_skips.values()),
+            reasons,
+        )
+
+    if unexpected_skips:
+        skipped_count = sum(unexpected_skips.values())
+        reasons = ", ".join(
+            f"{reason}={count}"
+            for reason, count in sorted(unexpected_skips.items())
         )
         logger.warning(
             "%s transformation skipped %s of %s records: %s",
             stage,
             skipped_count,
-            result.input_count,
+            len(result.records) + skipped_count,
             reasons,
         )
         return
 
-    logger.info(
-        "%s transformation processed %s records; skipped 0.",
-        stage,
-        len(result.records),
-    )
+    if not expected_skips:
+        logger.info(
+            "%s transformation processed %s records; skipped 0.",
+            stage,
+            len(result.records),
+        )
 
 
 def _fetch_parameter_observations(

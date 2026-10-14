@@ -105,7 +105,75 @@ def test_pipeline_logs_counts_and_reasons_for_skipped_records(
         caplog.text
     )
     assert "unsupported_parameter=1" in caplog.text
+    assert "WARNING" in caplog.text
     repository.save_measurements.assert_called_once_with([])
+
+
+def test_pipeline_logs_replaced_station_versions_as_info(
+    monkeypatch,
+    caplog,
+):
+    caplog.set_level("INFO")
+    observation_source = MagicMock()
+    observation_source.source_id = "DMI"
+    observation_source.source_name = "DMI Observation API"
+    observation_source.fetch.return_value = {"features": []}
+    station_source = MagicMock()
+    station_source.fetch.return_value = {
+        "features": [
+            {
+                "geometry": {"coordinates": [8.3, 55.7]},
+                "properties": {
+                    "stationId": "05329",
+                    "name": "Outrup",
+                    "type": "Pluvio",
+                    "country": "DNK",
+                    "validFrom": "2020-01-01T00:00:00Z",
+                },
+            },
+            {
+                "geometry": {"coordinates": [8.4, 55.8]},
+                "properties": {
+                    "stationId": "05329",
+                    "name": "Outrup",
+                    "type": "Pluvio",
+                    "country": "DNK",
+                    "validFrom": "2026-01-01T00:00:00Z",
+                },
+            },
+        ]
+    }
+    connection = MagicMock()
+    repository = MagicMock()
+    monkeypatch.setattr(
+        "app.pipeline.get_db_connection",
+        MagicMock(return_value=connection),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.MeasurementRepository",
+        MagicMock(return_value=repository),
+    )
+
+    run_dmi_pipeline(
+        observation_source,
+        station_source,
+        ("temp_dry",),
+    )
+
+    deduplication_log = next(
+        record
+        for record in caplog.records
+        if "deduplicated" in record.getMessage()
+    )
+    assert deduplication_log.levelname == "INFO"
+    assert "superseded_station_version=1" in deduplication_log.message
+    assert not any(
+        record.levelname == "WARNING"
+        and "DMI stations" in record.getMessage()
+        for record in caplog.records
+    )
+    repository.save_stations.assert_called_once()
+    assert len(repository.save_stations.call_args.args[0]) == 1
 
 
 def test_pipeline_fetches_parameters_concurrently(monkeypatch):
