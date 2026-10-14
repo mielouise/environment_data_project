@@ -1,4 +1,4 @@
-"""Unit tests for the transformation layer."""
+"""Unit tests for the transformation functions."""
 
 from datetime import datetime, timezone
 
@@ -6,291 +6,124 @@ import pytest
 
 from app.constants.parameters import ParameterIds
 from app.transform import (
-    DMIDataTransformer,
     MeasurementDTO,
+    transform_dmi_observations,
 )
+from app.transform.dmi import PARAMETER_MAPPING
 
 
-def test_transform_temperature() -> None:
-    """Verify temp_dry observations are transformed."""
-
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
-
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": "temp_dry",
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": 15.5,
-                }
-            }
-        ]
+def _observation(parameter_name, value=15.5, observed="2026-10-09T10:00:00Z"):
+    return {
+        "properties": {
+            "parameterId": parameter_name,
+            "observed": observed,
+            "stationId": "05329",
+            "value": value,
+        }
     }
 
-    results = transformer.transform(raw_json)
 
-    assert len(results) == 1
-
-    measurement = results[0]
-
-    assert measurement.source_id == "DMI"
-    assert (
-        measurement.parameter_id
-        == ParameterIds.TEMPERATURE
-    )
-    assert measurement.timestamp == datetime(
-        2026, 10, 9, 10, 0, tzinfo=timezone.utc
-    )
-    assert measurement.value == 15.5
-
-
-def test_transform_humidity() -> None:
-    """Verify humidity observations are transformed."""
-
-    transformer = DMIDataTransformer(
-        source_id="DMI"
+def test_transform_temperature():
+    results = transform_dmi_observations(
+        {"features": [_observation("temp_dry")]},
+        source_id="DMI",
     )
 
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": "humidity",
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": 85.0,
-                }
-            }
-        ]
-    }
-
-    results = transformer.transform(raw_json)
-
-    assert len(results) == 1
-
-    measurement = results[0]
-
-    assert (
-        measurement.parameter_id
-        == ParameterIds.HUMIDITY
-    )
-
-    assert measurement.value == 85.0
-
-
-def test_transform_humidity_past_1h() -> None:
-    """Verify humidity_past1h maps correctly."""
-
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
-
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": "humidity_past1h",
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": 81.0,
-                }
-            }
-        ]
-    }
-
-    results = transformer.transform(raw_json)
-
-    assert len(results) == 1
-
-    assert (
-        results[0].parameter_id
-        == ParameterIds.HUMIDITY_PAST_1H
-    )
+    assert results == [
+        MeasurementDTO(
+            source_id="DMI",
+            station_id="05329",
+            parameter_id=ParameterIds.TEMPERATURE.value,
+            timestamp=datetime(2026, 10, 9, 10, 0, tzinfo=timezone.utc),
+            value=15.5,
+        )
+    ]
 
 
 @pytest.mark.parametrize(
     ("parameter_name", "expected_parameter_id"),
     [
-        ("co2", ParameterIds.CO2),
-        ("pm25", ParameterIds.PM25),
+        ("humidity", ParameterIds.HUMIDITY),
+        ("humidity_past1h", ParameterIds.HUMIDITY_PAST_1H),
     ],
 )
-def test_transform_additional_supported_parameters(
+def test_transform_supported_parameters(
     parameter_name,
     expected_parameter_id,
 ):
-    """Verify all currently supported parameter IDs are mapped."""
-
-    transformer = DMIDataTransformer(source_id="DMI")
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": parameter_name,
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": "42.5",
-                }
-            }
-        ]
-    }
-
-    results = transformer.transform(raw_json)
+    results = transform_dmi_observations(
+        {"features": [_observation(parameter_name, "42.5")]},
+        source_id="DMI",
+    )
 
     assert len(results) == 1
-    assert results[0].parameter_id == expected_parameter_id
+    assert results[0].parameter_id == expected_parameter_id.value
     assert results[0].value == 42.5
 
 
-def test_transform_unknown_parameter() -> None:
-    """Verify unsupported parameters are ignored."""
+def test_transform_all_documented_dmi_parameters():
+    features = [
+        _observation(parameter_name, value="1")
+        for parameter_name in PARAMETER_MAPPING
+    ]
 
-    transformer = DMIDataTransformer(
-        source_id="DMI"
+    results = transform_dmi_observations(
+        {"features": features},
+        source_id="DMI",
     )
 
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": "wind_speed",
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": 7.5,
-                }
-            }
-        ]
+    assert len(results) == len(PARAMETER_MAPPING)
+    assert {
+        result.parameter_id for result in results
+    } == {
+        parameter.value for parameter in PARAMETER_MAPPING.values()
     }
 
-    results = transformer.transform(raw_json)
 
-    assert results == []
-
-
-def test_transform_missing_value() -> None:
-    """Verify observations without value are ignored."""
-
-    transformer = DMIDataTransformer(
-        source_id="DMI"
+def test_transform_categorical_dmi_codes_as_numeric_values():
+    results = transform_dmi_observations(
+        {
+            "features": [
+                _observation("weather", 171),
+                _observation("snow_cover_man", 0),
+            ]
+        },
+        source_id="DMI",
     )
 
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": "temp_dry",
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": None,
-                }
-            }
-        ]
-    }
-
-    results = transformer.transform(raw_json)
-
-    assert results == []
+    assert [result.value for result in results] == [171.0, 0.0]
 
 
-def test_transform_missing_required_observation_fields() -> None:
-    """Verify observations missing their parameter or timestamp are ignored."""
-
-    transformer = DMIDataTransformer(source_id="DMI")
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": 12.5,
-                }
-            },
-            {
-                "properties": {
-                    "parameterId": "temp_dry",
-                    "value": 12.5,
-                }
-            },
-        ]
-    }
-
-    assert transformer.transform(raw_json) == []
+@pytest.mark.parametrize(
+    "feature",
+    [
+        _observation("unknown_parameter"),
+        _observation("co2"),
+        _observation("pm25"),
+        _observation("temp_dry", None),
+        _observation("temp_dry", observed="NOT_A_DATE"),
+        _observation("temp_dry", "not-a-number"),
+        {"properties": {"observed": "2026-10-09T10:00:00Z", "value": 1}},
+        {"properties": {"parameterId": "temp_dry", "value": 1}},
+    ],
+)
+def test_unsupported_or_invalid_observations_are_skipped(feature):
+    assert transform_dmi_observations(
+        {"features": [feature]},
+        source_id="DMI",
+    ) == []
 
 
-def test_transform_invalid_timestamp() -> None:
-    """Verify invalid timestamps are ignored."""
-
-    transformer = DMIDataTransformer(
-        source_id="DMI"
+def test_transform_multiple_observations():
+    results = transform_dmi_observations(
+        {
+            "features": [
+                _observation("temp_dry", 15),
+                _observation("humidity", 72),
+            ]
+        },
+        source_id="DMI",
     )
-
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": "temp_dry",
-                    "observed": "NOT_A_DATE",
-                    "value": 12.5,
-                }
-            }
-        ]
-    }
-
-    results = transformer.transform(raw_json)
-
-    assert results == []
-
-
-def test_transform_invalid_numeric_value() -> None:
-    """Verify values that cannot be converted to floats are ignored."""
-
-    transformer = DMIDataTransformer(source_id="DMI")
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": "temp_dry",
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": "not-a-number",
-                }
-            }
-        ]
-    }
-
-    assert transformer.transform(raw_json) == []
-
-
-def test_transform_multiple_observations() -> None:
-    """Verify multiple observations are transformed."""
-
-    transformer = DMIDataTransformer(
-        source_id="DMI"
-    )
-
-    raw_json = {
-        "features": [
-            {
-                "properties": {
-                    "parameterId": "temp_dry",
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": 15.0,
-                }
-            },
-            {
-                "properties": {
-                    "parameterId": "humidity",
-                    "observed": "2026-10-09T10:00:00Z",
-                    "value": 72.0,
-                }
-            },
-        ]
-    }
-
-    results = transformer.transform(raw_json)
 
     assert len(results) == 2
-
-    assert all(
-        isinstance(
-            measurement,
-            MeasurementDTO
-        )
-        for measurement in results
-    )
+    assert all(isinstance(result, MeasurementDTO) for result in results)

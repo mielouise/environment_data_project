@@ -7,7 +7,7 @@ from datetime import (
 from unittest.mock import MagicMock
 
 from app.load import MeasurementRepository
-from app.transform import MeasurementDTO
+from app.transform import MeasurementDTO, StationDTO
 
 
 def test_save_source():
@@ -41,7 +41,7 @@ def test_save_source():
         "API_DMI",
     )
 
-    mock_conn.commit.assert_called_once()
+    mock_conn.commit.assert_not_called()
 
 
 def test_save_measurements_success():
@@ -61,6 +61,7 @@ def test_save_measurements_success():
 
     measurement = MeasurementDTO(
         source_id="DMI",
+        station_id="05329",
         parameter_id=1,
         timestamp=datetime(
             2026,
@@ -85,6 +86,7 @@ def test_save_measurements_success():
     assert rows == [
         (
             "DMI",
+            "05329",
             1,
             datetime(
                 2026,
@@ -98,7 +100,7 @@ def test_save_measurements_success():
         )
     ]
 
-    mock_conn.commit.assert_called_once()
+    mock_conn.commit.assert_not_called()
 
 
 def test_save_measurements_empty():
@@ -115,15 +117,46 @@ def test_save_measurements_empty():
     mock_conn.cursor.assert_not_called()
 
 
-def test_close():
-    """Verify repository closes connection."""
-
+def test_save_stations_upserts_latest_station_location():
     mock_conn = MagicMock()
-
-    repository = MeasurementRepository(
-        db_connection=mock_conn
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    repository = MeasurementRepository(mock_conn)
+    station = StationDTO(
+        station_id="05329",
+        name="Outrup",
+        station_type="Pluvio",
+        country_code="DNK",
+        latitude=55.723,
+        longitude=8.3327,
+        station_height=18.0,
+        valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
 
-    repository.close()
+    repository.save_stations([station])
 
-    mock_conn.close.assert_called_once()
+    query, rows = mock_cursor.executemany.call_args.args
+    assert "INSERT INTO dim_stations" in query
+    assert "ON CONFLICT (station_id)" in query
+    assert "EXCLUDED.valid_from >= dim_stations.valid_from" in query
+    assert rows == [
+        (
+            "05329",
+            "Outrup",
+            "Pluvio",
+            "DNK",
+            55.723,
+            8.3327,
+            18.0,
+            datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+    ]
+    mock_conn.commit.assert_not_called()
+
+
+def test_save_stations_empty_skips_database_work():
+    mock_conn = MagicMock()
+
+    MeasurementRepository(mock_conn).save_stations([])
+
+    mock_conn.cursor.assert_not_called()

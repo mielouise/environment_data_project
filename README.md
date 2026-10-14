@@ -26,9 +26,14 @@ integration tests.
 ## Features
 
 - Retrieve environmental observations from the DMI API
-- Transform supported temperature, humidity, CO2, and PM2.5 observations
-- Store source metadata and measurements in PostgreSQL
+- Filter observations by parameter and a rolling time window at the API
+- Fetch parameter-filtered observations concurrently, with a five-request
+  limit to avoid unbounded load on DMI
+- Transform the documented DMI meteorological observation parameters,
+  including categorical weather and snow-cover codes
+- Store source metadata, station locations, and measurements in PostgreSQL
 - Apply versioned SQL migrations automatically at startup
+- Optionally repeat the DMI pipeline at a configurable interval
 - Run unit and integration tests with Pytest
 - Use Docker Compose for local development and execution
 - Manage the database through pgAdmin
@@ -61,6 +66,36 @@ git clone https://github.com/mielouise/environment_data_project.git
 cd environment_data_project
 ```
 
+### Configure environment variables
+
+Create a local `.env` file from the committed example before starting the
+project:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Review `.env` and replace the example passwords before using the project
+outside local development. `.env` is ignored by Git; do not commit real
+credentials.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DMI_API_URL` | Yes | DMI collections URL, for example `https://opendataapi.dmi.dk/v2/metObs/collections`. The application appends the selected collection and `/items` path. For a local API, set its reachable collections URL here. |
+| `POSTGRES_HOST` | Yes | Database host; use `db` when running with Docker Compose. |
+| `POSTGRES_PORT` | Yes | PostgreSQL port, normally `5432`. |
+| `POSTGRES_DB` | Yes | PostgreSQL database name. |
+| `POSTGRES_USER` | Yes | PostgreSQL username. |
+| `POSTGRES_PASSWORD` | Yes | PostgreSQL password. |
+| `PGADMIN_USER_EMAIL` | For pgAdmin | Email address used to sign in to pgAdmin. |
+| `PGADMIN_PASSWORD` | For pgAdmin | pgAdmin sign-in password. |
+| `DMI_PARAMETER_IDS` | No | Comma-separated DMI parameter IDs. Leave blank to use the selective default: `temp_dry,humidity,wind_speed,precip_past1h`. |
+| `ETL_INTERVAL_SECONDS` | No | Repeat interval in seconds. Docker Compose defaults to 300 seconds; set blank for one-shot execution. |
+
+The application builds the observation and station item endpoints from
+`DMI_API_URL` in code. Use the collections URL shown above; the application
+appends `/observation/items` and `/station/items` as needed.
+
 ### Start the application
 
 ```bash
@@ -70,7 +105,70 @@ docker compose up --build app
 This builds and starts the application together with its PostgreSQL
 dependency. The application initializes the database schema and runs the ETL
 workflow: it requests observations from the DMI API, transforms them, and
-saves the source and measurements to PostgreSQL.
+saves the source, station locations, and measurements to PostgreSQL. By
+default, it requests only air temperature (`temp_dry`), humidity (`humidity`),
+wind speed (`wind_speed`), and precipitation over the previous hour
+(`precip_past1h`) for Denmark, limited to the previous 24 hours. These
+parameter filters are sent directly to DMI, avoiding requests for unrelated
+observation types. The pipeline also supports all documented parameter
+identifiers, including categorical observations; the DMI observation catalogue
+does not include the legacy CO2 and PM2.5 database parameters. By default,
+this is a one-shot run.
+
+Set `DMI_PARAMETER_IDS` to any comma-separated subset of documented parameter
+identifiers to change the selection and reduce API traffic further:
+
+```bash
+docker compose run --rm -e DMI_PARAMETER_IDS=temp_dry,humidity app
+```
+
+The application reads `DMI_API_URL` as the DMI collections URL and constructs
+both the observation `items` endpoint and station `items` endpoint in code.
+Station coordinates are taken from the GeoJSON response and measurements
+retain their DMI station ID. The observation and station collections are
+listed in the [DMI API collections
+catalogue](https://opendataapi.dmi.dk/v2/metObs/collections); available
+parameters and units are documented in the [DMI meteorological observations
+catalogue](https://www.dmi.dk/friedata/dokumentation/meteorological-observations-data#c24107).
+
+Docker Compose runs the pipeline immediately and repeats every 300 seconds by
+default, including when `ETL_INTERVAL_SECONDS` is unset or blank. Change the
+variable in `.env` to use another interval. To run a single cycle instead, use:
+
+```bash
+docker compose run --rm -e ETL_INTERVAL_SECONDS= app
+```
+
+The pipeline runs immediately and then repeats every 300 seconds. Each
+completed cycle reports its measurement count in the app logs. A failed cycle
+is logged and retried at the next interval. You can also pass
+`--interval-seconds 300` when running `python -m app.main` directly.
+
+### Run ETL on a schedule with GitHub Actions
+
+The `.github/workflows/dmi-etl.yml` workflow runs one ETL cycle every five
+minutes and can also be started manually from the repository's Actions tab.
+Each scheduled run uses a fresh GitHub-hosted runner, so it connects to the
+existing PostgreSQL database; it does not start the local Compose database.
+
+Configure these repository Actions secrets before enabling the workflow:
+
+| Secret | Description |
+|--------|-------------|
+| `POSTGRES_HOST` | Hostname of the existing PostgreSQL server. This must be the hosted database's reachable hostname, not `db` (which only resolves inside Docker Compose). |
+| `POSTGRES_PORT` | PostgreSQL port; optional, defaults to `5432`. |
+| `POSTGRES_DB` | Database name. |
+| `POSTGRES_USER` | Database user. |
+| `POSTGRES_PASSWORD` | Database password. |
+
+The database must accept connections from the runner. Avoid exposing
+PostgreSQL broadly to the internet; use a network-restricted hosted runner or
+a self-hosted GitHub Actions runner inside the database's trusted network
+when the database firewall cannot securely allow hosted runners. The
+workflow runs a single cycle per invocation, applies any pending migrations,
+and exits. Scheduled runs are serialized to avoid overlapping ETL jobs.
+Use GitHub repository Actions secrets for all database credentials; do not
+put passwords in the workflow file or commit them to the repository.
 
 To start PostgreSQL and pgAdmin for database inspection:
 
@@ -127,13 +225,22 @@ environment_data_project/
 │   │   ├── __init__.py
 │   │   ├── base.py
 │   │   └── dmi.py
+│   ├── load/
+│   │   ├── __init__.py
+│   │   └── measurement_repository.py
+│   ├── transform/
+│   │   ├── __init__.py
+│   │   ├── dmi.py
+│   │   ├── models.py
+│   │   └── stations.py
 │   ├── database.py
+│   ├── migration_runner.py
 │   ├── migrations/
-│   │   └── 0001_initial_schema.sql
-│   ├── etl_service.py
-│   ├── load.py
+│   │   ├── 0001_initial_schema.sql
+│   │   ├── 0002_station_locations.sql
+│   │   └── 0003_dmi_observation_parameters.sql
 │   ├── main.py
-│   └── transform.py
+│   └── pipeline.py
 ├── pgadmin/
 │   └── servers.json
 ├── tests/
@@ -145,13 +252,16 @@ environment_data_project/
 │   └── unit/
 │       ├── __init__.py
 │       ├── test_database.py
-│       ├── test_etl_service.py
 │       ├── test_extract.py
 │       ├── test_load.py
+│       ├── test_migrations.py
 │       ├── test_main.py
+│       ├── test_pipeline.py
+│       ├── test_stations.py
 │       └── test_transform.py
 ├── .dockerignore
 ├── .gitignore
+├── .env.example
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements-dev.txt
@@ -162,17 +272,19 @@ environment_data_project/
 ## File overview
 
 - The `app` directory contains the application code. Docker starts the
-  application through `app/main.py`, which orchestrates the ETL process. This
-  file is therefore the recommended application entry point.
+  application through `app/main.py`, which configures and runs the pipeline.
 - The `app/extract` directory contains the code for retrieving data from the
   DMI API, including a shared abstraction for data sources.
+- The `app/transform` directory contains pure transformation functions and
+  the measurement data model.
+- The `app/load` directory contains persistence components.
 - The `app/constants` directory contains shared constants, including IDs for
   the supported measurement parameters.
 - The `app/migrations` directory contains versioned SQL scripts for creating
   and updating the database schema.
-- `app/transform.py`, `app/load.py`, `app/database.py`, and
-  `app/etl_service.py` handle data transformation, data storage, database
-  connections, and orchestration of the ETL process, respectively.
+- `app/pipeline.py` defines the concrete DMI extract-transform-load flow.
+- `app/database.py` manages database connections, while
+  `app/migration_runner.py` discovers and applies SQL migrations.
 - The `tests` directory contains the test suite, which is run by the `tests`
   service in Docker Compose. It is divided into two subdirectories:
   - The `tests/unit` directory contains unit tests that test application code
@@ -204,7 +316,7 @@ The diagrams below describe the solution from four different
 perspectives:
 
 1. Application component architecture
-2. UML class design
+2. Implementation design
 3. Runtime ETL workflow
 4. Database design
 
@@ -221,44 +333,44 @@ flowchart LR
     subgraph Application["Application"]
         direction TB
         Main["«component»<br/>Application entry point<br/>app/main.py"]
-        ETL["«component»<br/>ETL orchestrator<br/>ETLService"]
+        ETL["«component»<br/>Pipeline function<br/>run_dmi_pipeline"]
         Source["«component»<br/>DMI data source<br/>DMIDataSource"]
-        Transformer["«component»<br/>Data transformer<br/>DMIDataTransformer"]
+        Transformer["«component»<br/>Transformation functions<br/>transform_dmi_observations"]
         Repository["«component»<br/>Measurement repository<br/>MeasurementRepository"]
-        Database["«component»<br/>Database utilities<br/>app/database.py"]
+        Database["«component»<br/>Database connection<br/>app/database.py"]
+        Migrations["«component»<br/>Migration runner<br/>app/migration_runner.py"]
     end
 
     DMI["«external system»<br/>DMI Observation API"]
     PostgreSQL[("«database»<br/>PostgreSQL")]
 
-    Main -.->|creates and runs| ETL
-    ETL -.->|uses| Source
-    ETL -.->|uses| Transformer
-    ETL -.->|uses| Repository
-    Source <-->|HTTP observations| DMI
-    Main -.->|applies migrations and opens connection| Database
-    Database -->|schema and connection| PostgreSQL
+    Main -.->|configures and runs| ETL
+    ETL -.->|fetches from| Source
+    ETL -.->|transforms with| Transformer
+    ETL -.->|persists to| Repository
+    Source <-->|HTTP observations and station data| DMI
+    ETL -.->|opens connection after extraction| Database
+    Main -.->|applies migrations| Migrations
+    Database -->|connection| PostgreSQL
+    Migrations -->|schema| PostgreSQL
     Repository -->|SQL operations| PostgreSQL
 
     classDef application fill:#eff6ff,stroke:#2563eb,color:#0f172a,stroke-width:1.5px
     classDef external fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-width:1.5px
     classDef datastore fill:#ecfdf5,stroke:#059669,color:#064e3b,stroke-width:1.5px
 
-    class Main,ETL,Source,Transformer,Repository,Database application
+    class Main,ETL,Source,Transformer,Repository,Database,Migrations application
     class DMI external
     class PostgreSQL datastore
 ```
 
-### UML class diagram
+### Implementation relationships
 
-- Shows the static structure of the main ETL classes, including their key
-  attributes and methods.
+- Shows the source and repository classes alongside the ETL functions.
 - The solid inheritance arrow shows that `DMIDataSource` extends
   `SensorDataSource`.
-- The solid associations show which data source, transformer, and repository
-  `ETLService` uses.
-- The dashed dependencies show that the transformer creates `MeasurementDTO`
-  objects and uses `ParameterIds`, while the repository persists the DTOs.
+- The dashed dependencies show how the pipeline connects extraction,
+  transformation, and persistence.
 
 ```mermaid
 classDiagram
@@ -268,28 +380,35 @@ classDiagram
         <<abstract>>
         +source_id: str
         +source_name: str
-        +fetch() dict
+        +fetch(params) dict
+    }
+
+    class StationDTO {
+        +station_id: str
+        +name: str
+        +station_type: str
+        +country_code: str
+        +latitude: float
+        +longitude: float
+        +station_height: float | None
+        +valid_from: datetime
     }
 
     class DMIDataSource {
         +url: str
-        +fetch() dict
+        +fetch(params) dict
     }
 
-    class ETLService {
-        -source: SensorDataSource
-        -transformer: DMIDataTransformer
-        -repository: MeasurementRepository
-        +run() int
-    }
-
-    class DMIDataTransformer {
-        -source_id: str
-        +transform(raw_json) list~MeasurementDTO~
+    class PipelineFunctions {
+        <<module functions>>
+        run_dmi_pipeline(observation_source, station_source, parameter_ids) int
+        transform_dmi_observations(raw_json, source_id) list~MeasurementDTO~
+        transform_dmi_stations(raw_json) list~StationDTO~
     }
 
     class MeasurementDTO {
         +source_id: str
+        +station_id: str
         +parameter_id: int
         +timestamp: datetime
         +value: float
@@ -298,8 +417,8 @@ classDiagram
     class MeasurementRepository {
         -_conn
         +save_source(source_id, source_name, source_type) None
+        +save_stations(stations) None
         +save_measurements(records) None
-        +close() None
     }
 
     class ParameterIds {
@@ -307,64 +426,87 @@ classDiagram
         TEMPERATURE
         HUMIDITY
         HUMIDITY_PAST_1H
+        TEMP_DEW
+        WIND_SPEED
+        PRECIP_PAST_10MIN
+        WEATHER
         CO2
         PM25
     }
 
     SensorDataSource <|-- DMIDataSource
 
-    ETLService --> SensorDataSource : uses
-    ETLService --> DMIDataTransformer : uses
-    ETLService --> MeasurementRepository : uses
-    DMIDataTransformer ..> MeasurementDTO : creates
-    DMIDataTransformer ..> ParameterIds : maps parameter IDs
+    PipelineFunctions --> SensorDataSource : extracts observations and stations
+    PipelineFunctions --> MeasurementRepository : persists to
+    PipelineFunctions ..> MeasurementDTO : transforms to
+    PipelineFunctions ..> ParameterIds : maps parameter IDs
     MeasurementRepository ..> MeasurementDTO : persists
 ```
 
 ### ETL workflow
 
-The single activity diagram below shows the complete application run, including
-database migrations before the ETL path, decision points, error handling, and
-connection cleanup.
+The activity diagram below shows the application run, including database
+migrations before the ETL path, optional repeated execution, transactional
+writes, error handling, and connection cleanup.
 
 ```mermaid
 flowchart TD
     Start((Start))
-    InitSchema["1. Apply pending database migrations"]
-    ReadURL["2. Read DMI_API_URL"]
+    ReadURL["1. Read DMI_API_URL"]
     HasURL{"API URL configured?"}
-    BuildServices["3. Create data source, transformer,<br/>database connection, repository,<br/>and ETL service"]
-    Fetch["4. Fetch observations from DMI API"]
-    Transform["5. Transform supported observations<br/>into MeasurementDTO records"]
+    BuildSource["2. Create DMI data sources and validate configuration"]
+    InitSchema["3. Apply pending database migrations"]
+    FetchStations["4. Fetch station metadata from DMI"]
+    Fetch["5. Fetch filtered observations from DMI"]
+    TransformStations["Transform station data<br/>into StationDTO records"]
+    Transform["Transform observations<br/>into MeasurementDTO records"]
+    Connect["Open a fresh database connection"]
     SaveSource["6. Save DMI source metadata"]
-    SaveMeasurements["7. Call save_measurements(records)"]
+    SaveStations["Save station metadata"]
+    SaveMeasurements["7. Save measurement records"]
     HasRecords{"Any measurements?"}
     WriteRecords["Insert or update measurements<br/>in PostgreSQL"]
     NoRecords["No measurement rows to write"]
     Count["Return processed measurement count"]
     ReportSuccess["Report successful completion"]
     ReportFailure["Log error and exit<br/>with failure status"]
-    Cleanup["Close application database connection<br/>if one was opened"]
+    CycleFailure["Log cycle failure"]
+    Cleanup["Close database connection"]
+    FailureCleanup["Close database connection if opened"]
+    Continuous{"Continuous interval configured?"}
+    Retry{"Continuous execution enabled?"}
+    Wait["Wait for configured interval"]
     End((End))
 
-    Start --> InitSchema --> ReadURL --> HasURL
-    HasURL -->|Yes| BuildServices --> Fetch
-    Transform --> SaveSource
-    Fetch --> Transform
-    SaveSource --> SaveMeasurements --> HasRecords
+    Start --> ReadURL --> HasURL
+    HasURL -->|Yes| BuildSource --> InitSchema --> FetchStations
+    FetchStations --> TransformStations
+    FetchStations --> Fetch --> Transform
+    TransformStations --> Connect
+    Transform --> Connect --> SaveSource
+    SaveSource --> SaveStations --> SaveMeasurements --> HasRecords
     HasRecords -->|Yes| WriteRecords --> Count
     HasRecords -->|No| NoRecords --> Count
-    Count --> ReportSuccess --> Cleanup --> End
+    Count --> ReportSuccess --> Cleanup --> Continuous
+    Continuous -->|No| End
+    Continuous -->|Yes| Wait --> FetchStations
     HasURL -->|No| ReportFailure
-    ReportFailure --> Cleanup
+    ReportFailure --> End
 
+    BuildSource -. error .-> ReportFailure
     InitSchema -. error .-> ReportFailure
-    BuildServices -. error .-> ReportFailure
-    Fetch -. error .-> ReportFailure
-    Transform -. error .-> ReportFailure
-    SaveSource -. error .-> ReportFailure
-    SaveMeasurements -. error .-> ReportFailure
-    WriteRecords -. error .-> ReportFailure
+    FetchStations -. error .-> CycleFailure
+    Fetch -. error .-> CycleFailure
+    TransformStations -. error .-> CycleFailure
+    Transform -. error .-> CycleFailure
+    Connect -. error .-> CycleFailure
+    SaveSource -. error .-> CycleFailure
+    SaveStations -. error .-> CycleFailure
+    SaveMeasurements -. error .-> CycleFailure
+    WriteRecords -. error .-> CycleFailure
+    CycleFailure --> FailureCleanup --> Retry
+    Retry -->|Yes| Wait
+    Retry -->|No| ReportFailure
 
     classDef terminal fill:#0f766e,color:#ffffff,stroke:#115e59,stroke-width:2px
     classDef action fill:#eff6ff,color:#0f172a,stroke:#2563eb,stroke-width:1.5px
@@ -373,8 +515,8 @@ flowchart TD
     classDef failure fill:#fee2e2,color:#7f1d1d,stroke:#dc2626,stroke-width:1.5px
 
     class Start,End terminal
-    class InitSchema,ReadURL,BuildServices,Fetch,Transform,SaveSource,SaveMeasurements,WriteRecords,NoRecords,Count,Cleanup action
-    class HasURL,HasRecords decision
+    class InitSchema,ReadURL,BuildSource,Connect,Fetch,Transform,TransformStations,FetchStations,SaveSource,SaveStations,SaveMeasurements,WriteRecords,NoRecords,Count,Cleanup,FailureCleanup,Wait,CycleFailure action
+    class HasURL,HasRecords,Continuous,Retry decision
     class ReportSuccess success
     class ReportFailure failure
 ```
@@ -382,17 +524,19 @@ flowchart TD
 The workflow proceeds as follows:
 
 1. Apply pending database migrations to create or update the database schema.
-2. Read the `DMI_API_URL` setting.
-3. If the URL is configured, create the data source, transformer, database
-   connection, repository, and ETL service.
-4. Fetch observations from the DMI API and transform supported observations
-   into measurement records.
-5. Save the DMI source metadata, then insert or update the measurement records
-   in PostgreSQL when any are available.
-6. Report the number of processed measurements and close the database
+2. Read the `DMI_API_URL` collections URL and build the observation and station
+   item endpoints.
+3. Create data sources for DMI observations and station metadata.
+4. Fetch stations and filtered observations, then transform them into station
+   and measurement records before opening a database connection.
+5. Save source metadata, station metadata, and measurements in one database
+   transaction. A failed load rolls back all of its writes and closes the
    connection.
-7. If setup or processing fails, report the error and close the database
-   connection if one was opened.
+6. Report the number of processed measurements and close the database
+   connection. If continuous execution is enabled, wait for the configured
+   interval and repeat from step 4 with a fresh connection.
+7. If setup fails, report the error and exit. In continuous mode, a failed
+   cycle is logged and retried after the configured interval.
 
 #### Database migrations
 
@@ -404,19 +548,21 @@ in the PostgreSQL `schema_migrations` table. Migrations run in a transaction,
 and a database advisory lock prevents concurrent application instances from
 applying the same migration simultaneously.
 
-The initial migration creates the current schema using idempotent statements,
-so an existing database created by an earlier version of this project can
-adopt migration tracking without dropping its tables or measurement data.
+The initial migration creates the original schema using idempotent
+statements, so an existing database created by an earlier version of this
+project can adopt migration tracking without dropping its tables or
+measurement data. Later migrations add station metadata and the complete DMI
+parameter catalogue.
 
 After a migration has been committed, do not edit or rename it. To change the
 schema, add a new migration file with the next version, such as
-`0002_add_station_metadata.sql`. This preserves a consistent upgrade path for
+`0004_add_station_history.sql`. This preserves a consistent upgrade path for
 existing installations.
 
 ### Database design
 
 The database follows a normalized dimensional design consisting of one
-fact table and two dimension tables.
+fact table and three dimension tables.
 
 This design was chosen to reduce data redundancy, improve data integrity,
 and make it easier to extend the solution with additional environmental
@@ -449,6 +595,11 @@ Examples:
 | 4 | CO2 | ppm |
 | 5 | PM2.5 | μg/m³ |
 
+Migration `0003_dmi_observation_parameters.sql` adds all DMI parameters in
+the meteorological observations catalogue. Numeric enum codes (for example
+weather codes) are stored in the same numeric value column as measurements
+and use the `enum` unit to distinguish them from physical quantities.
+
 #### Fact table
 
 ##### FACT_MEASUREMENTS
@@ -458,6 +609,7 @@ Stores individual environmental observations.
 Each measurement references:
 
 - one source
+- one station
 - one parameter
 
 through foreign-key relationships.
@@ -465,7 +617,7 @@ through foreign-key relationships.
 The schema also includes a unique constraint on:
 
 ```sql
-(source_id, parameter_id, timestamp)
+(source_id, station_id, parameter_id, timestamp)
 ```
 
 #### Entity relationship diagram
@@ -476,6 +628,7 @@ between its tables.
 ```mermaid
 erDiagram
     DIM_SOURCES ||--o{ FACT_MEASUREMENTS : records
+    DIM_STATIONS ||--o{ FACT_MEASUREMENTS : locates
     DIM_PARAMETERS ||--o{ FACT_MEASUREMENTS : classifies
 
     DIM_SOURCES {
@@ -490,9 +643,17 @@ erDiagram
         VARCHAR unit "Measurement unit"
     }
 
+    DIM_STATIONS {
+        VARCHAR station_id PK "DMI station identifier"
+        VARCHAR name "Station name"
+        DOUBLE latitude "WGS84 latitude"
+        DOUBLE longitude "WGS84 longitude"
+    }
+
     FACT_MEASUREMENTS {
         SERIAL measurement_id PK "Measurement identifier"
         VARCHAR source_id FK "References DIM_SOURCES"
+        VARCHAR station_id FK "References DIM_STATIONS"
         INTEGER parameter_id FK "References DIM_PARAMETERS"
         TIMESTAMPTZ timestamp "Observation time"
         NUMERIC value "Measurement value"
@@ -502,11 +663,13 @@ erDiagram
 - `DIM_SOURCES` stores metadata about each data source, including its name and
   type.
 - `DIM_PARAMETERS` defines the measured parameters and their units.
+- `DIM_STATIONS` stores the station identity and its latest known location.
 - `FACT_MEASUREMENTS` stores each environmental observation's timestamp and
   numeric value.
-- Each measurement references exactly one source and one parameter through
-  foreign keys.
-- A source and a parameter can each be referenced by multiple measurements.
+- Each measurement references exactly one source, station, and parameter
+  through foreign keys.
+- A source, station, and parameter can each be referenced by multiple
+  measurements.
 - Separating measurements from descriptive metadata supports consistent
   storage and analysis across sources and parameters.
 

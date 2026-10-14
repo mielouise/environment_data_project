@@ -1,7 +1,7 @@
 """Base abstraction for environmental data sources."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Mapping
 
 
 class SensorDataSource(ABC):
@@ -29,8 +29,15 @@ class SensorDataSource(ABC):
         self.source_name = source_name
 
     @abstractmethod
-    def fetch(self) -> dict[str, Any]:
+    def fetch(
+        self,
+        params: Mapping[str, str | int] | None = None,
+    ) -> dict[str, Any]:
         """Fetch raw data from the source.
+
+        Args:
+            params:
+                Optional request query parameters.
 
         Returns:
             Raw JSON-compatible payload.
