@@ -8,7 +8,7 @@ from psycopg import Connection
 from app.transform.models import MeasurementDTO, StationDTO
 
 
-class MeasurementRepository:
+class MeasurementRepository:2
     """Persist environmental sources, stations, and measurements."""
 
     def __init__(self, db_connection: Connection[Any]) -> None:
