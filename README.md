@@ -114,48 +114,30 @@ the environment must have network access to DMI.
 
 ```text
 environment_data_project/
-├── .devcontainer/
-│   ├── Dockerfile
-│   ├── devcontainer-lock.json
-│   └── devcontainer.json
 ├── app/
-│   ├── __init__.py
 │   ├── constants/
-│   │   ├── __init__.py
-│   │   └── parameters.py
 │   ├── extract/
-│   │   ├── __init__.py
 │   │   ├── base.py
-│   │   └── dmi.py
-│   ├── database.py
+│   │   ├── dmi.py
+│   │   └── stations.py
+│   ├── transform/
+│   │   ├── observations.py
+│   │   └── stations.py
+│   ├── load/
+│   │   └── repository.py
+│   ├── pipelines/
+│   │   └── weather_pipeline.py
 │   ├── migrations/
-│   │   └── 0001_initial_schema.sql
-│   ├── etl_service.py
-│   ├── load.py
+│   │   ├── 0001_initial_schema.sql
+│   │   └── 0002_add_stations.sql
+│   ├── database.py
+│   ├── migration_runner.py
 │   ├── main.py
-│   └── transform.py
-├── pgadmin/
-│   └── servers.json
+│   └── etl_service.py  # deprecated compatibility adapter
 ├── tests/
-│   ├── __init__.py
-│   ├── integration/
-│   │   ├── __init__.py
-│   │   ├── test_dmi_api.py
-│   │   └── test_postgres.py
-│   └── unit/
-│       ├── __init__.py
-│       ├── test_database.py
-│       ├── test_etl_service.py
-│       ├── test_extract.py
-│       ├── test_load.py
-│       ├── test_main.py
-│       └── test_transform.py
-├── .dockerignore
-├── .gitignore
-├── Dockerfile
+│   ├── unit/
+│   └── integration/
 ├── docker-compose.yml
-├── requirements-dev.txt
-├── requirements.txt
 └── README.md
 ```
 
