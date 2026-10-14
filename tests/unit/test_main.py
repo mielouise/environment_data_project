@@ -115,8 +115,6 @@ def test_configured_dmi_parameters_defaults_to_selected_categories(
     assert DEFAULT_DMI_PARAMETER_IDS == (
         "temp_dry",
         "humidity",
-        "wind_speed",
-        "precip_past1h",
     )
     assert _configured_parameter_ids() == DEFAULT_DMI_PARAMETER_IDS
 

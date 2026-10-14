@@ -13,8 +13,6 @@ from app.transform.dmi import SUPPORTED_DMI_PARAMETER_IDS
 DEFAULT_DMI_PARAMETER_IDS = (
     "temp_dry",
     "humidity",
-    "wind_speed",
-    "precip_past1h",
 )
 
 

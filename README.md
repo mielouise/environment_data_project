@@ -81,8 +81,8 @@ credentials.
 
 The ETL application requires `DMI_API_URL` and the five `POSTGRES_*`
 variables. The pgAdmin variables are needed only when starting the `pgadmin`
-service. `DMI_PARAMETER_IDS` is optional and defaults to a selective set of
-temperature, humidity, wind-speed, and precipitation observations.
+service. `DMI_PARAMETER_IDS` is optional and defaults to air temperature and
+humidity observations.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -94,7 +94,7 @@ temperature, humidity, wind-speed, and precipitation observations.
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL password. |
 | `PGADMIN_USER_EMAIL` | For pgAdmin | Email address used to sign in to pgAdmin. |
 | `PGADMIN_PASSWORD` | For pgAdmin | pgAdmin sign-in password. |
-| `DMI_PARAMETER_IDS` | No | Comma-separated DMI parameter IDs. Leave blank to use the selective default: `temp_dry,humidity,wind_speed,precip_past1h`. |
+| `DMI_PARAMETER_IDS` | No | Comma-separated DMI parameter IDs. Leave blank to use the default: `temp_dry,humidity`. |
 
 The application builds the observation and station item endpoints from
 `DMI_API_URL` in code. Use the collections URL shown above; the application
@@ -110,14 +110,13 @@ This builds and starts the application together with its PostgreSQL
 dependency. The application initializes the database schema and runs the ETL
 workflow: it requests observations from the DMI API, transforms them, and
 saves the source, station locations, and measurements to PostgreSQL. By
-default, it requests only air temperature (`temp_dry`), humidity (`humidity`),
-wind speed (`wind_speed`), and precipitation over the previous hour
-(`precip_past1h`) for Denmark, limited to the previous 24 hours. These
-parameter filters are sent directly to DMI, avoiding requests for unrelated
-observation types. The pipeline also supports all documented parameter
-identifiers, including categorical observations; the DMI observation catalogue
-does not include the legacy CO2 and PM2.5 database parameters. By default,
-this is a one-shot run.
+default, it requests only air temperature (`temp_dry`) and humidity
+(`humidity`) for Denmark, limited to the previous 24 hours. Each selected
+parameter is sent directly to DMI as a `parameterId` query filter, avoiding
+requests for unrelated observation types. The pipeline also supports all
+documented parameter identifiers, including categorical observations; the
+DMI observation catalogue does not include the legacy CO2 and PM2.5 database
+parameters. By default, this is a one-shot run.
 
 Set `DMI_PARAMETER_IDS` to any comma-separated subset of documented parameter
 identifiers to change the selection and reduce API traffic further:
