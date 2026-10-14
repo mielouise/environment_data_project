@@ -539,3 +539,60 @@ After completing this project, participants should be able to:
 **Mie Louise Nielsen**
 
 GitHub: https://github.com/mielouise
+
+
+---
+
+## Runde 2: architecture and operations
+
+The application now exposes one concrete orchestration function, `run_weather_pipeline()`, rather than requiring every pipeline to follow a one-source/one-transform/one-destination pattern. Station metadata is loaded before weather measurements; observations are fetched separately for each requested meteorological parameter. Transformations are split into small functions and placed in `app/transform_steps/`, while persistence is in `app/loaders/`. Legacy imports are kept for compatibility.
+
+```mermaid
+flowchart TD
+    Main[main: single run or periodic poll] --> Pipeline[run_weather_pipeline]
+    Pipeline --> Stations[extract/stations.py]
+    Pipeline --> Observations[extract/dmi.py]
+    Stations --> StationTransform[transform_steps/stations.py]
+    Observations --> MeasurementTransform[transform_steps/observations.py]
+    StationTransform --> StationLoad[loaders: save_stations]
+    StationLoad --> MeasurementLoad[loaders: save_measurements]
+    MeasurementTransform --> MeasurementLoad
+    MeasurementLoad --> Database[(PostgreSQL)]
+```
+
+The connection helpers remain in `app/database.py`, whereas migration tracking, SHA-256 checksums, transaction handling and advisory locking have moved to `app/migration_runner.py`. SQL migration `0001_initial_schema.sql` is unchanged. The new `0002_add_stations.sql` adds a station dimension and a nullable station foreign key to the fact table. The uniqueness key now contains `station_id` to prevent observations from different stations overwriting each other. Missing station IDs in historical records stay NULL; station IDs not returned by the station endpoint are still retained as minimal dimension records.
+
+### Environment configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DMI_API_URL` | Meteorological observations endpoint (in Compose) | Observations items endpoint |
+| `DMI_STATIONS_URL` | DMI meteorological stations endpoint | Station metadata items endpoint |
+| `DMI_PARAMETER_IDS` | `temp_dry,humidity` | Comma-separated requested parameter types |
+| `DMI_STATION_ID` | unset | Optional DMI station ID filter |
+| `DMI_LOOKBACK_MINUTES` | `60` | Sliding lookback period for late-arriving observations |
+| `DMI_PAGE_SIZE` | `1000` | Maximum features requested per page |
+| `DMI_POLL_SECONDS` | `0` in Python; `300` in Compose | 0 = run once; greater than 0 = repeat |
+| `DMI_FETCH_STATIONS` | `true` | Whether to refresh station metadata |
+
+To run continuously:
+
+```bash
+docker compose up --build app
+```
+
+For an individual cycle, override `DMI_POLL_SECONDS=0`. To run tests, use:
+
+```bash
+docker compose run --build --rm tests
+```
+
+The observation client sends `parameterId`, `datetime`, `limit` and `offset` to the DMI API rather than downloading everything and filtering only locally. `stationId` is sent when configured. Overlapping time windows are intentional: database upserts make repeated ingestion idempotent. A per-query safety cap is imposed to prevent runaway pagination. Each request has a network timeout; a failed polling cycle is logged and retried on the next scheduled cycle.
+
+### Parameter selection and limitations
+
+The pre-existing dimension includes `temp_dry`, `humidity`, `humidity_past1h`, `co2` and `pm25`. **Only `temp_dry` and `humidity` are configured by default.** Other internal mappings are retained for compatibility, but the meteorological observation collection does not necessarily provide every mapped environmental variable. Unsupported parameters are not blindly added to the database: each addition requires confirmation of the provider's documented parameter names and units, a matching dimension entry, and tests. This is why the project intentionally does not collect all available DMI measurements.
+
+Stations have geographical point coordinates, and observations reference their IDs. **Historical warning:** a station may change location or metadata over time. The present `dim_stations` table stores one record per station ID, so its coordinates represent the last loaded version, not a time-versioned history. For strict historical location accuracy, extend the schema to station versions with validity intervals and join observations by observation date.
+
+See the existing sections above for installation and the original database design, plus the newer relationships explained here.
