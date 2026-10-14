@@ -545,17 +545,17 @@ GitHub: https://github.com/mielouise
 
 ## Runde 2: architecture and operations
 
-The application now exposes one concrete orchestration function, `run_weather_pipeline()`, rather than requiring every pipeline to follow a one-source/one-transform/one-destination pattern. Station metadata is loaded before weather measurements; observations are fetched separately for each requested meteorological parameter. Transformations are split into small functions and placed in `app/transform_steps/`, while persistence is in `app/loaders/`. Legacy imports are kept for compatibility.
+The application now exposes one concrete orchestration function, `run_weather_pipeline()`, rather than requiring every pipeline to follow a one-source/one-transform/one-destination pattern. Station metadata is loaded before weather measurements; observations are fetched separately for each requested meteorological parameter. Transformations are split into small functions and placed in `app/transform/`, while persistence is in `app/load/`. Legacy imports are kept for compatibility.
 
 ```mermaid
 flowchart TD
     Main[main: single run or periodic poll] --> Pipeline[run_weather_pipeline]
     Pipeline --> Stations[extract/stations.py]
     Pipeline --> Observations[extract/dmi.py]
-    Stations --> StationTransform[transform_steps/stations.py]
-    Observations --> MeasurementTransform[transform_steps/observations.py]
-    StationTransform --> StationLoad[loaders: save_stations]
-    StationLoad --> MeasurementLoad[loaders: save_measurements]
+    Stations --> StationTransform[transform/stations.py]
+    Observations --> MeasurementTransform[transform/observations.py]
+    StationTransform --> StationLoad[load: save_stations]
+    StationLoad --> MeasurementLoad[load: save_measurements]
     MeasurementTransform --> MeasurementLoad
     MeasurementLoad --> Database[(PostgreSQL)]
 ```
