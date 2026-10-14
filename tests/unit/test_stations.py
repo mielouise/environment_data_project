@@ -1,4 +1,4 @@
-from app.transform_stations import transform_stations
+from app.transform import transform_stations
 
 
 def test_transform_stations_extracts_coordinates():
