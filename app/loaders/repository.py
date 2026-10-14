@@ -46,6 +46,21 @@ class MeasurementRepository:
             DO UPDATE SET value = EXCLUDED.value;
         """
         with self._conn.cursor() as cursor:
+            # Some observations refer to stations absent from the station endpoint
+            # (for example historic or inactive stations). Preserve their identity.
+            missing_station_ids = sorted({
+                record.station_id for record in records
+                if record.station_id is not None
+            })
+            if missing_station_ids:
+                cursor.executemany(
+                    """
+                    INSERT INTO dim_stations (station_id)
+                    VALUES (%s)
+                    ON CONFLICT (station_id) DO NOTHING;
+                    """,
+                    [(station_id,) for station_id in missing_station_ids],
+                )
             cursor.executemany(query, [
                 (r.source_id, r.parameter_id, r.timestamp, r.value, r.station_id)
                 for r in records
