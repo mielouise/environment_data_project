@@ -22,6 +22,7 @@ def test_main_pipeline_success(
     capsys,
 ):
     monkeypatch.setenv("DMI_API_URL", "http://fake-url.com")
+    monkeypatch.delenv("DMI_PARAMETER_IDS", raising=False)
     mock_source = MagicMock()
     mock_station_source = MagicMock()
     mock_source_cls.side_effect = [mock_source, mock_station_source]

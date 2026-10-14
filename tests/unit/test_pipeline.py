@@ -101,10 +101,8 @@ def test_pipeline_logs_counts_and_reasons_for_skipped_records(
         ("temp_dry",),
     ) == 0
 
-    assert "DMI observations transformation skipped 1 of 1 records" in (
-        caplog.text
-    )
-    assert "unsupported_parameter=1" in caplog.text
+    assert "DMI observations unexpected skips:" in caplog.text
+    assert "'unsupported_parameter': 1" in caplog.text
     assert "WARNING" in caplog.text
     repository.save_measurements.assert_called_once_with([])
 
@@ -163,10 +161,10 @@ def test_pipeline_logs_replaced_station_versions_as_info(
     deduplication_log = next(
         record
         for record in caplog.records
-        if "deduplicated" in record.getMessage()
+        if "DMI stations expected skips:" in record.getMessage()
     )
     assert deduplication_log.levelname == "INFO"
-    assert "superseded_station_version=1" in deduplication_log.message
+    assert "'superseded_station_version': 1" in deduplication_log.message
     assert not any(
         record.levelname == "WARNING"
         and "DMI stations" in record.getMessage()
