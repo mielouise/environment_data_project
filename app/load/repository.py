@@ -19,9 +19,23 @@ class MeasurementRepository:
         self._conn.commit()
 
     def save_stations(self, stations: list[StationDTO]) -> None:
+        """Store station IDs plus every dated historical version.
+
+        dim_stations remains a convenient latest-metadata lookup; historical
+        geographic joins use dim_station_versions instead.
+        """
         if not stations:
             return
-        query = """
+        unique_stations: dict[str, StationDTO] = {}
+        for station in stations:
+            previous = unique_stations.get(station.station_id)
+            if previous is None or (
+                station.valid_from is not None
+                and (previous.valid_from is None or station.valid_from > previous.valid_from)
+            ):
+                unique_stations[station.station_id] = station
+
+        station_query = """
             INSERT INTO dim_stations (station_id, station_name, latitude, longitude)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (station_id) DO UPDATE SET
@@ -29,10 +43,63 @@ class MeasurementRepository:
                 latitude = EXCLUDED.latitude,
                 longitude = EXCLUDED.longitude;
         """
+        versions = [
+            (
+                station.station_id, station.valid_from, station.valid_to,
+                station.station_name, station.latitude, station.longitude,
+                station.station_type, station.station_status, station.country,
+                station.owner, station.station_height,
+            )
+            for station in stations
+            if station.valid_from is not None
+            and (station.valid_to is None or station.valid_to > station.valid_from)
+        ]
+        version_query = """
+            INSERT INTO dim_station_versions (
+                station_id, valid_from, valid_to, station_name,
+                latitude, longitude, station_type, station_status,
+                country, owner, station_height
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (station_id, valid_from) DO UPDATE SET
+                valid_to = EXCLUDED.valid_to,
+                station_name = EXCLUDED.station_name,
+                latitude = EXCLUDED.latitude,
+                longitude = EXCLUDED.longitude,
+                station_type = EXCLUDED.station_type,
+                station_status = EXCLUDED.station_status,
+                country = EXCLUDED.country,
+                owner = EXCLUDED.owner,
+                station_height = EXCLUDED.station_height;
+        """
         with self._conn.cursor() as cursor:
-            cursor.executemany(query, [
-                (s.station_id, s.station_name, s.latitude, s.longitude) for s in stations
+            cursor.executemany(station_query, [
+                (station.station_id, station.station_name,
+                 station.latitude, station.longitude)
+                for station in unique_stations.values()
             ])
+            if versions:
+                cursor.executemany(version_query, versions)
+            # Relink existing measurements when historical metadata arrives later.
+            cursor.execute("""
+                UPDATE fact_measurements AS f
+                SET station_version_id = (
+                    SELECT v.station_version_id
+                    FROM dim_station_versions v
+                    WHERE v.station_id = f.station_id
+                      AND v.valid_from <= f.timestamp
+                      AND (v.valid_to IS NULL OR f.timestamp < v.valid_to)
+                    ORDER BY v.valid_from DESC
+                    LIMIT 1
+                )
+                WHERE f.station_id IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM dim_station_versions v
+                    WHERE v.station_id = f.station_id
+                      AND v.valid_from <= f.timestamp
+                      AND (v.valid_to IS NULL OR f.timestamp < v.valid_to)
+                  );
+            """)
         self._conn.commit()
 
     def save_measurements(self, records: list[MeasurementDTO]) -> None:
@@ -65,6 +132,28 @@ class MeasurementRepository:
                 (r.source_id, r.parameter_id, r.timestamp, r.value, r.station_id)
                 for r in records
             ])
+        # Enrich new/updated measurements with the station version valid at observation time.
+        with self._conn.cursor() as cursor:
+            cursor.execute("""
+                UPDATE fact_measurements AS f
+                SET station_version_id = (
+                    SELECT v.station_version_id
+                    FROM dim_station_versions v
+                    WHERE v.station_id = f.station_id
+                      AND v.valid_from <= f.timestamp
+                      AND (v.valid_to IS NULL OR f.timestamp < v.valid_to)
+                    ORDER BY v.valid_from DESC
+                    LIMIT 1
+                )
+                WHERE f.station_id IS NOT NULL
+                  AND f.station_version_id IS NULL
+                  AND EXISTS (
+                    SELECT 1 FROM dim_station_versions v
+                    WHERE v.station_id = f.station_id
+                      AND v.valid_from <= f.timestamp
+                      AND (v.valid_to IS NULL OR f.timestamp < v.valid_to)
+                  );
+            """)
         self._conn.commit()
 
     def close(self) -> None:
