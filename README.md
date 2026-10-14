@@ -86,7 +86,7 @@ humidity observations.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DMI_API_URL` | Yes | DMI collections URL, for example `https://opendataapi.dmi.dk/v2/metObs/collections`. The application appends the selected collection and `/items` path. For a local API, set its reachable collections URL here. |
+| `DMI_API_URL` | Yes | Short DMI API base URL, for example `https://opendataapi.dmi.dk` (or the base URL of a local API). The application adds the API version, collection, and `/items` endpoint in code. |
 | `POSTGRES_HOST` | Yes | Database host; use `db` when running with Docker Compose. |
 | `POSTGRES_PORT` | Yes | PostgreSQL port, normally `5432`. |
 | `POSTGRES_DB` | Yes | PostgreSQL database name. |
@@ -96,9 +96,10 @@ humidity observations.
 | `PGADMIN_PASSWORD` | For pgAdmin | pgAdmin sign-in password. |
 | `DMI_PARAMETER_IDS` | No | Comma-separated DMI parameter IDs. Leave blank to use the default: `temp_dry,humidity`. |
 
-The application builds the observation and station item endpoints from
-`DMI_API_URL` in code. Use the collections URL shown above; the application
-appends `/observation/items` and `/station/items` as needed.
+The application builds the versioned observation and station item endpoints
+from `DMI_API_URL` in code, appending
+`/v2/metObs/collections/observation/items` and
+`/v2/metObs/collections/station/items`.
 
 ### Start the application
 
@@ -116,7 +117,8 @@ parameter is sent directly to DMI as a `parameterId` query filter, avoiding
 requests for unrelated observation types. The pipeline also supports all
 documented parameter identifiers, including categorical observations; the
 DMI observation catalogue does not include the legacy CO2 and PM2.5 database
-parameters. By default, this is a one-shot run.
+parameters. Each application invocation is a one-shot run. The GitHub Actions
+workflow runs it automatically once per hour.
 
 Set `DMI_PARAMETER_IDS` to any comma-separated subset of documented parameter
 identifiers to change the selection and reduce API traffic further:
@@ -125,8 +127,8 @@ identifiers to change the selection and reduce API traffic further:
 docker compose run --rm -e DMI_PARAMETER_IDS=temp_dry,humidity app
 ```
 
-The application reads `DMI_API_URL` as the DMI collections URL and constructs
-both the observation `items` endpoint and station `items` endpoint in code.
+The application reads `DMI_API_URL` as the short API base URL and constructs
+the versioned observation and station `items` endpoints in code.
 Station coordinates are taken from the GeoJSON response and measurements
 retain their DMI station ID. The observation and station collections are
 listed in the [DMI API collections
@@ -140,17 +142,19 @@ If malformed or unsupported records are skipped during transformation, the
 application logs a summary by stage and reason, such as missing required
 fields, unsupported parameter, invalid timestamp, or invalid coordinates.
 
-### Run ETL manually with GitHub Actions
+### Run ETL continuously with GitHub Actions
 
-The `.github/workflows/dmi-etl.yml` workflow can be started manually from the
-repository's Actions tab. It runs one ETL cycle on a fresh GitHub-hosted
-runner, so it connects to the existing PostgreSQL database; it does not start
-the local Compose database. The workflow does not run on a schedule.
+The `.github/workflows/etl.yaml` workflow runs the ETL once every hour, at the
+start of the hour (UTC), and can also be started manually from the repository's
+Actions tab. Each run uses a fresh GitHub-hosted runner and connects to the
+existing PostgreSQL database; it does not start the local Compose database.
+GitHub may delay scheduled runs during periods of high load.
 
 Configure these repository Actions secrets before enabling the workflow:
 
 | Secret | Description |
 |--------|-------------|
+| `DMI_API_URL` | Short DMI API base URL, for example `https://opendataapi.dmi.dk`. The application adds the API version, collection, and endpoint paths. |
 | `POSTGRES_HOST` | Hostname of the existing PostgreSQL server. This must be the hosted database's reachable hostname, not `db` (which only resolves inside Docker Compose). |
 | `POSTGRES_PORT` | PostgreSQL port; optional, defaults to `5432`. |
 | `POSTGRES_DB` | Database name. |
@@ -162,7 +166,7 @@ PostgreSQL broadly to the internet; use a network-restricted hosted runner or
 a self-hosted GitHub Actions runner inside the database's trusted network
 when the database firewall cannot securely allow hosted runners. The
 workflow runs a single cycle per invocation, applies any pending migrations,
-and exits. Concurrent manual runs are serialized to avoid overlapping ETL jobs.
+and exits. Workflow runs are serialized to avoid overlapping ETL jobs.
 Use GitHub repository Actions secrets for all database credentials; do not
 put passwords in the workflow file or commit them to the repository.
 
@@ -511,8 +515,8 @@ flowchart TD
 The workflow proceeds as follows:
 
 1. Apply pending database migrations to create or update the database schema.
-2. Read the `DMI_API_URL` collections URL and build the observation and station
-   item endpoints.
+2. Read the short `DMI_API_URL` base URL and build the versioned observation
+   and station item endpoints.
 3. Create data sources for DMI observations and station metadata.
 4. Fetch stations and filtered observations, then transform them into station
    and measurement records before opening a database connection.
