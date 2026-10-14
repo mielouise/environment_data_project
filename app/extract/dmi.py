@@ -1,14 +1,14 @@
 """DMI GeoJSON API client with bounded pagination and request filtering."""
 from typing import Any
 import requests
-from app.extract.base import SensorDataSource
 
 
-class DMIDataSource(SensorDataSource):
+class DMIDataSource:
     REQUEST_TIMEOUT_SECONDS = 10
 
     def __init__(self, source_id: str, source_name: str, url: str) -> None:
-        super().__init__(source_id, source_name)
+        self.source_id = source_id
+        self.source_name = source_name
         self.url = url
 
     def fetch(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
