@@ -3,7 +3,7 @@ import re
 from hashlib import sha256
 from pathlib import Path
 
-MIGRATION_FILENAME_PATTERN = re.compile(r"^(?P<version>\\d+)_(?P<name>[a-z0-9_]+)\\.sql$")
+MIGRATION_FILENAME_PATTERN = re.compile(r"^(?P<version>\d+)_(?P<name>[a-z0-9_]+)\.sql$")
 
 def apply_migrations(get_connection, migrations_dir: Path) -> None:
     """Apply pending database migrations.
