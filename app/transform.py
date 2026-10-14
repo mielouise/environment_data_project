@@ -1,142 +1,66 @@
-"""Transformation services for environmental observations.
-
-Transforms raw DMI API observations into normalized Data Transfer
-Objects (DTOs) suitable for insertion into the dimensional database.
-"""
-
+"""Small normalization functions for DMI observations."""
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from typing import Any
-
 from app.constants.parameters import ParameterIds
 
 
 @dataclass(frozen=True)
 class MeasurementDTO:
-    """Represents a normalized environmental measurement.
-
-    Attributes:
-        source_id:
-            Unique identifier of the measurement source.
-
-        parameter_id:
-            Foreign key reference to dim_parameters.
-
-        timestamp:
-            Timestamp of the observation.
-
-        value:
-            Recorded observation value.
-    """
-
     source_id: str
     parameter_id: int
     timestamp: datetime
     value: float
+    station_id: str | None = None
+
+
+PARAMETER_MAPPING = {
+    "temp_dry": ParameterIds.TEMPERATURE,
+    "humidity": ParameterIds.HUMIDITY,
+    "humidity_past1h": ParameterIds.HUMIDITY_PAST_1H,
+    "co2": ParameterIds.CO2,
+    "pm25": ParameterIds.PM25,
+}
+
+
+def transform_observation(feature: dict[str, Any], source_id: str) -> MeasurementDTO | None:
+    """Transform one observation; return None for malformed or unsupported rows."""
+    props = feature.get("properties") or {}
+    parameter_id = PARAMETER_MAPPING.get(props.get("parameterId"))
+    if parameter_id is None or props.get("observed") is None or props.get("value") is None:
+        return None
+    try:
+        timestamp = datetime.fromisoformat(props["observed"].replace("Z", "+00:00"))
+        value = float(props["value"])
+        if timestamp.tzinfo is None or not isfinite(value):
+            return None
+    except (ValueError, TypeError, AttributeError):
+        return None
+    station = props.get("stationId")
+    return MeasurementDTO(
+        source_id=source_id, parameter_id=int(parameter_id),
+        timestamp=timestamp, value=value,
+        station_id=str(station) if station is not None else None,
+    )
+
+
+def transform_measurements(raw_json: dict[str, Any], source_id: str) -> list[MeasurementDTO]:
+    """Normalize a collection without coupling parsing to HTTP or persistence."""
+    result = []
+    for feature in raw_json.get("features", []):
+        measurement = transform_observation(feature, source_id)
+        if measurement is not None:
+            result.append(measurement)
+    return result
 
 
 class DMIDataTransformer:
-    """Transform DMI observations into MeasurementDTO objects."""
+    """Backward-compatible facade for the existing transform API."""
+    PARAMETER_MAPPING = PARAMETER_MAPPING
 
-    # Supported DMI parameters and their corresponding
-    # identifiers in the dim_parameters table.
-    PARAMETER_MAPPING: dict[str, ParameterIds] = {
-        "temp_dry": ParameterIds.TEMPERATURE,
-        "humidity": ParameterIds.HUMIDITY,
-        "humidity_past1h": ParameterIds.HUMIDITY_PAST_1H,
-        "co2": ParameterIds.CO2,
-        "pm25": ParameterIds.PM25,
-    }
-
-    def __init__(
-        self,
-        source_id: str
-    ) -> None:
-        """Initialize transformer.
-
-        Args:
-            source_id:
-                Source identifier assigned to generated measurements.
-        """
+    def __init__(self, source_id: str) -> None:
         self.source_id = source_id
 
-    def transform(
-        self,
-        raw_json: dict[str, Any]
-    ) -> list[MeasurementDTO]:
-        """Transform raw DMI observations into DTO objects.
-
-        Extracts supported environmental parameters from the
-        DMI API response and converts them into normalized
-        MeasurementDTO instances.
-
-        Args:
-            raw_json:
-                Raw JSON payload returned from the DMI API.
-
-        Returns:
-            List of normalized measurements ready for
-            persistence in the fact_measurements table.
-        """
-
-        measurements: list[MeasurementDTO] = []
-
-        features = raw_json.get("features", [])
-
-        for feature in features:
-            properties = feature.get(
-                "properties",
-                {}
-            )
-
-            parameter_name = properties.get(
-                "parameterId"
-            )
-
-            observed_time = properties.get(
-                "observed"
-            )
-
-            value = properties.get(
-                "value"
-            )
-
-            if (
-                parameter_name is None
-                or observed_time is None
-                or value is None
-            ):
-                continue
-
-            parameter_id = self.PARAMETER_MAPPING.get(
-                parameter_name
-            )
-
-            if parameter_id is None:
-                continue
-
-            try:
-                timestamp = datetime.fromisoformat(
-                    observed_time.replace(
-                        "Z",
-                        "+00:00"
-                    )
-                )
-
-                measurements.append(
-                    MeasurementDTO(
-                        source_id=self.source_id,
-                        parameter_id=parameter_id.value,
-                        timestamp=timestamp,
-                        value=float(value)
-                    )
-                )
-
-            except (
-                ValueError,
-                TypeError,
-                AttributeError,
-            ):
-                continue
-
-        return measurements
+    def transform(self, raw_json: dict[str, Any]) -> list[MeasurementDTO]:
+        return transform_measurements(raw_json, self.source_id)
