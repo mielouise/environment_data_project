@@ -59,7 +59,7 @@ class MeasurementRepository:
                 """
                 INSERT INTO dim_stations (
                     station_id,
-                    name,
+                    station_name,
                     station_type,
                     country_code,
                     latitude,
@@ -69,7 +69,7 @@ class MeasurementRepository:
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (station_id) DO UPDATE SET
-                    name = EXCLUDED.name,
+                    station_name = EXCLUDED.station_name,
                     station_type = EXCLUDED.station_type,
                     country_code = EXCLUDED.country_code,
                     latitude = EXCLUDED.latitude,

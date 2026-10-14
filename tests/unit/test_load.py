@@ -137,6 +137,7 @@ def test_save_stations_upserts_latest_station_location():
 
     query, rows = mock_cursor.executemany.call_args.args
     assert "INSERT INTO dim_stations" in query
+    assert "station_name" in query
     assert "ON CONFLICT (station_id)" in query
     assert "EXCLUDED.valid_from >= dim_stations.valid_from" in query
     assert rows == [

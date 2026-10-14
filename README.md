@@ -631,7 +631,7 @@ erDiagram
 
     DIM_STATIONS {
         VARCHAR station_id PK "DMI station identifier"
-        VARCHAR name "Station name"
+        VARCHAR station_name "Station name"
         DOUBLE latitude "WGS84 latitude"
         DOUBLE longitude "WGS84 longitude"
     }
