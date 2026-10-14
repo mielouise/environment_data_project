@@ -1,6 +1,4 @@
-"""Environmental data extraction sources."""
+"""Extract stage: DMI HTTP client."""
+from .dmi import DMIDataSource
 
-from app.extract.base import SensorDataSource
-from app.extract.dmi import DMIDataSource
-
-__all__ = ["DMIDataSource", "SensorDataSource"]
+__all__ = ["DMIDataSource"]
