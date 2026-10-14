@@ -1,22 +1,39 @@
-- name: Build image
-  run: docker compose up --build app
+name: Environmental Data ETL
 
-- name: Start DB service
-  run: docker compose up -d db
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
 
-- name: Wait for Postgres to become ready
-  env:
-    POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-    POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
-  run: |
-    # retry up to 30 times for pg_isready inside the db container
-    for i in $(seq 1 30); do
-      if docker compose exec -T db pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
-        echo "Postgres is ready"; break
-      fi
-      echo "Waiting for Postgres... ($i)"
-      sleep 2
-    done
+concurrency:
+  group: dmi-etl
+  cancel-in-progress: false
 
-- name: Run ETL pipeline (start app + deps and return app exit code)
-  run: docker compose up --exit-code-from app app
+permissions:
+  contents: read
+
+jobs:
+  etl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run one ETL cycle
+        env:
+          DMI_API_URL: ${{ secrets.DMI_API_URL }}
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT || '5432' }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: python -m app.main

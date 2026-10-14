@@ -1,5 +1,6 @@
 """Application entry point for the environmental data pipeline."""
 
+import logging
 import os
 import sys
 
@@ -39,6 +40,10 @@ def _configured_parameter_ids() -> tuple[str, ...]:
 
 def main() -> None:
     """Initialize and run one ETL pipeline cycle."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     print("=== Starting Environmental Data ETL Pipeline ===", flush=True)
 
     try:

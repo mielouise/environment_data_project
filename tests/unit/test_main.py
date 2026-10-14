@@ -1,5 +1,6 @@
 """Unit tests for the application entry point."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,12 +24,18 @@ def test_main_pipeline_success(
 ):
     monkeypatch.setenv("DMI_API_URL", "http://fake-url.com")
     monkeypatch.delenv("DMI_PARAMETER_IDS", raising=False)
+    configure_logging = MagicMock()
+    monkeypatch.setattr("app.main.logging.basicConfig", configure_logging)
     mock_source = MagicMock()
     mock_station_source = MagicMock()
     mock_source_cls.side_effect = [mock_source, mock_station_source]
 
     main()
 
+    configure_logging.assert_called_once_with(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     mock_apply_migrations.assert_called_once_with()
     assert mock_source_cls.call_args_list[0].kwargs == {
         "source_id": "DMI",

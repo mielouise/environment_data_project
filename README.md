@@ -75,9 +75,11 @@ project:
 Copy-Item .env.example .env
 ```
 
-Review `.env` and replace the example passwords before using the project
-outside local development. `.env` is ignored by Git; do not commit real
-credentials.
+Keep `POSTGRES_HOST=db` and `POSTGRES_PORT=5432` when running the services
+with Docker Compose. The example database name, database username, passwords,
+and pgAdmin email are configurable; replace the example credentials before
+using the project outside local development. `.env` is ignored by Git; do not
+commit real credentials.
 
 The ETL application requires `DMI_API_URL` and the five `POSTGRES_*`
 variables. The pgAdmin variables are needed only when starting the `pgadmin`
@@ -87,13 +89,13 @@ humidity observations.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DMI_API_URL` | Yes | Short DMI API base URL, for example `https://opendataapi.dmi.dk` (or the base URL of a local API). The application adds the API version, collection, and `/items` endpoint in code. |
-| `POSTGRES_HOST` | Yes | Database host; use `db` when running with Docker Compose. |
-| `POSTGRES_PORT` | Yes | PostgreSQL port, normally `5432`. |
-| `POSTGRES_DB` | Yes | PostgreSQL database name. |
-| `POSTGRES_USER` | Yes | PostgreSQL username. |
-| `POSTGRES_PASSWORD` | Yes | PostgreSQL password. |
-| `PGADMIN_USER_EMAIL` | For pgAdmin | Email address used to sign in to pgAdmin. |
-| `PGADMIN_PASSWORD` | For pgAdmin | pgAdmin sign-in password. |
+| `POSTGRES_HOST` | Yes | Keep `db` for Docker Compose; it is the Compose database service name. |
+| `POSTGRES_PORT` | Yes | Keep `5432` for Docker Compose. |
+| `POSTGRES_DB` | Yes | Database name; the example value can be changed. |
+| `POSTGRES_USER` | Yes | Database username; the example value can be changed. |
+| `POSTGRES_PASSWORD` | Yes | Database password; set a suitable value for your environment. |
+| `PGADMIN_USER_EMAIL` | For pgAdmin | Sign-in email; the example value can be changed. |
+| `PGADMIN_PASSWORD` | For pgAdmin | Sign-in password; set a suitable value for your environment. |
 | `DMI_PARAMETER_IDS` | No | Comma-separated DMI parameter IDs. Leave blank to use the default: `temp_dry,humidity`. |
 
 The application builds the versioned observation and station item endpoints
@@ -117,8 +119,10 @@ parameter is sent directly to DMI as a `parameterId` query filter, avoiding
 requests for unrelated observation types. The pipeline also supports all
 documented parameter identifiers, including categorical observations; the
 DMI observation catalogue does not include the legacy CO2 and PM2.5 database
-parameters. Each application invocation is a one-shot run. The GitHub Actions
-workflow runs it automatically once per hour.
+parameters. The default selection is intentionally narrow to keep request
+volume manageable; expand it with `DMI_PARAMETER_IDS` when the downstream use
+case requires additional measurements. Each application invocation is a
+one-shot run. The GitHub Actions workflow runs it automatically once per hour.
 
 Set `DMI_PARAMETER_IDS` to any comma-separated subset of documented parameter
 identifiers to change the selection and reduce API traffic further:
@@ -150,7 +154,8 @@ Actions tab. Each run uses a fresh GitHub-hosted runner and connects to the
 existing PostgreSQL database; it does not start the local Compose database.
 GitHub may delay scheduled runs during periods of high load.
 
-Configure these repository Actions secrets before enabling the workflow:
+Configure these repository Actions secrets before enabling the workflow.
+These settings are for the GitHub-hosted runner, not local Docker Compose:
 
 | Secret | Description |
 |--------|-------------|
