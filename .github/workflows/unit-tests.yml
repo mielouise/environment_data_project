@@ -15,4 +15,4 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements-dev.txt
       - name: Run offline unit tests
-        run: python -m pytest tests/unit -q
+        run: python -m pytest tests/unit -q --cov=app --cov-report=term-missing
