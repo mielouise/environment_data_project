@@ -26,7 +26,7 @@ integration tests.
 ## Features
 
 - Retrieve environmental observations from the DMI API
-- Transform supported temperature, humidity, CO2, and PM2.5 observations
+- Transform selected meteorological temperature and humidity observations
 - Store source metadata and measurements in PostgreSQL
 - Apply versioned SQL migrations automatically at startup
 - Run unit and integration tests with Pytest
@@ -575,7 +575,7 @@ The observation client sends `parameterId`, `datetime`, `limit` and `offset` to 
 
 The pre-existing dimension includes `temp_dry`, `humidity`, `humidity_past1h`, `co2` and `pm25`. **Only `temp_dry` and `humidity` are configured by default.** Other internal mappings are retained for compatibility, but the meteorological observation collection does not necessarily provide every mapped environmental variable. Unsupported parameters are not blindly added to the database: each addition requires confirmation of the provider's documented parameter names and units, a matching dimension entry, and tests. This is why the project intentionally does not collect all available DMI measurements.
 
-Stations have geographical point coordinates, and observations reference their IDs. **Historical warning:** a station may change location or metadata over time. The present `dim_stations` table stores one record per station ID, so its coordinates represent the last loaded version, not a time-versioned history. For strict historical location accuracy, extend the schema to station versions with validity intervals and join observations by observation date.
+Stations have geographical point coordinates, and observations reference their IDs. The additional `0003_station_history.sql` migration preserves individual DMI metadata versions in `dim_station_versions`; measurements can be linked to the station version valid at observation time.
 
 See the existing sections above for installation and the original database design, plus the newer relationships explained here.
 
@@ -584,3 +584,16 @@ See the existing sections above for installation and the original database desig
 The [Capabilities API](https://python-dmi-open-data.readthedocs.io/en/latest/metobs/CapabilitiesApi/) describes collection discovery and service metadata, including `GET /v2/metObs/collections`, `GET /v2/metObs/collections/observation` and `GET /v2/metObs/collections/station`. These are **not** observation data endpoints. This ETL reads item data directly from the [MetObservationApi](https://python-dmi-open-data.readthedocs.io/en/latest/metobs/MetObservationApi/) and [MetStationApi](https://python-dmi-open-data.readthedocs.io/en/latest/metobs/MetStationApi/) endpoints (`.../items`), and needs no separate SDK dependency because existing code uses `requests`. The SDK examples describe optional `datetime`, `station_id`/`stationId`, `parameter_id`/`parameterId`, `limit` and `offset` filters; use the HTTP wire names `stationId` and `parameterId` in actual query strings.
 
 Parameter and collection availability can be explored through the capabilities endpoints, but parameter names must still be checked against DMI's meteorological observation catalog.
+
+
+### DMI source-of-truth refinements: stations and observation parameters
+
+DMI's official documentation:
+- [Meteorological Observation Data Stations](https://www.dmi.dk/friedata/dokumentation/data/meteorological-observation-data-stations)
+- [Meteorological Observations Data](https://www.dmi.dk/friedata/dokumentation/meteorological-observations-data#c24107)
+
+Stations have a stable `stationId`, while metadata can change. Versioned properties include `validFrom` and `validTo`. The pipeline now stores all available dated station versions in `dim_station_versions` using `(station_id, valid_from)` as the historical identifier, while keeping `dim_stations` for stable station identity and latest-known coordinates. `fact_measurements.station_version_id` identifies the version valid at the `observed` timestamp using a half-open interval `[valid_from, valid_to)`; when no matching version is available, it remains NULL rather than inventing a historical location. Migration `0003_station_history.sql` extends earlier migrations without editing them.
+
+For the meteorological observation collection the active transform mapping accepts `temp_dry`, `humidity`, and `humidity_past1h` only. The prior `co2` and `pm25` mapping was removed because these are not established parameters in the referenced metObs data catalog. Their original `dim_parameters` seed rows remain in the existing immutable migration for compatibility; **they are not fetched or stored by this metObs pipeline**. The default requested parameters remain `temp_dry,humidity`.
+
+**Historical coverage caveat:** The station API query must return dated historical versions if historical spatial analysis is required. If only current metadata is returned, the system cannot reconstruct earlier station coordinates. Temporal joins are only as complete as the fetched station history.
