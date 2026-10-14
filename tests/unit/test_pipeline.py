@@ -63,6 +63,51 @@ def test_pipeline_extracts_transforms_and_persists_measurements(monkeypatch):
     connection.close.assert_called_once_with()
 
 
+def test_pipeline_logs_counts_and_reasons_for_skipped_records(
+    monkeypatch,
+    caplog,
+):
+    observation_source = MagicMock()
+    observation_source.source_id = "DMI"
+    observation_source.source_name = "DMI Observation API"
+    observation_source.fetch.return_value = {
+        "features": [
+            {
+                "properties": {
+                    "stationId": "05329",
+                    "parameterId": "unknown",
+                    "observed": "2026-10-14T10:00:00Z",
+                    "value": 1,
+                }
+            }
+        ]
+    }
+    station_source = MagicMock()
+    station_source.fetch.return_value = {"features": []}
+    connection = MagicMock()
+    repository = MagicMock()
+    monkeypatch.setattr(
+        "app.pipeline.get_db_connection",
+        MagicMock(return_value=connection),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.MeasurementRepository",
+        MagicMock(return_value=repository),
+    )
+
+    assert run_dmi_pipeline(
+        observation_source,
+        station_source,
+        ("temp_dry",),
+    ) == 0
+
+    assert "DMI observations transformation skipped 1 of 1 records" in (
+        caplog.text
+    )
+    assert "unsupported_parameter=1" in caplog.text
+    repository.save_measurements.assert_called_once_with([])
+
+
 def test_pipeline_fetches_parameters_concurrently(monkeypatch):
     observation_source = MagicMock()
     observation_source.source_id = "DMI"

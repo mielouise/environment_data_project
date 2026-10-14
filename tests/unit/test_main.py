@@ -8,7 +8,6 @@ from app.main import (
     DEFAULT_DMI_PARAMETER_IDS,
     _configured_parameter_ids,
     main,
-    run_continuously,
 )
 
 
@@ -20,9 +19,9 @@ def test_main_pipeline_success(
     mock_source_cls,
     mock_apply_migrations,
     monkeypatch,
+    capsys,
 ):
     monkeypatch.setenv("DMI_API_URL", "http://fake-url.com")
-    monkeypatch.delenv("ETL_INTERVAL_SECONDS", raising=False)
     mock_source = MagicMock()
     mock_station_source = MagicMock()
     mock_source_cls.side_effect = [mock_source, mock_station_source]
@@ -49,6 +48,9 @@ def test_main_pipeline_success(
         station_source=mock_station_source,
         parameter_ids=DEFAULT_DMI_PARAMETER_IDS,
     )
+    assert "ETL cycle completed: 2 observations processed." in (
+        capsys.readouterr().out
+    )
 
 
 @patch("app.main.apply_migrations")
@@ -60,14 +62,12 @@ def test_main_pipeline_database_initialization_failure(mock_apply_migrations):
 
     assert exc_info.value.code == 1
 
-
 @patch("app.main.apply_migrations")
 def test_main_requires_dmi_api_url(
     mock_apply_migrations,
     monkeypatch,
 ):
     monkeypatch.delenv("DMI_API_URL", raising=False)
-    monkeypatch.delenv("ETL_INTERVAL_SECONDS", raising=False)
 
     with pytest.raises(SystemExit) as exc_info:
         main()
@@ -84,52 +84,12 @@ def test_main_pipeline_runtime_error_exits_with_failure_status(
     monkeypatch,
 ):
     monkeypatch.setenv("DMI_API_URL", "http://fake-url.com")
-    monkeypatch.delenv("ETL_INTERVAL_SECONDS", raising=False)
     mock_run_pipeline.side_effect = RuntimeError("DMI server is down")
 
     with pytest.raises(SystemExit) as exc_info:
         main()
 
     assert exc_info.value.code == 1
-
-
-def test_continuous_execution_retries_after_failure(monkeypatch, caplog, capsys):
-    run_once = MagicMock(side_effect=[RuntimeError("temporary"), 1])
-    sleep = MagicMock()
-
-    def stop_after_second_sleep(interval):
-        if sleep.call_count == 2:
-            raise KeyboardInterrupt
-
-    sleep.side_effect = stop_after_second_sleep
-    monkeypatch.setattr("app.main.time.sleep", sleep)
-
-    with pytest.raises(KeyboardInterrupt):
-        run_continuously(run_once, 60)
-
-    assert run_once.call_count == 2
-    assert sleep.call_count == 2
-    assert "Pipeline execution failed; it will be retried." in caplog.text
-    assert "ETL cycle completed: 1 observations processed." in (
-        capsys.readouterr().out
-    )
-
-
-def test_main_enables_continuous_execution_from_environment(monkeypatch):
-    monkeypatch.setenv("DMI_API_URL", "http://fake-url.com")
-    monkeypatch.setenv("ETL_INTERVAL_SECONDS", "300")
-    monkeypatch.setattr("app.main.apply_migrations", MagicMock())
-    run_continuously_mock = MagicMock()
-    monkeypatch.setattr(
-        "app.main.run_continuously",
-        run_continuously_mock,
-    )
-
-    main()
-
-    run_continuously_mock.assert_called_once()
-    assert callable(run_continuously_mock.call_args.args[0])
-    assert run_continuously_mock.call_args.args[1] == 300
 
 
 def test_main_uses_configured_dmi_parameters(monkeypatch):
@@ -170,18 +130,3 @@ def test_main_rejects_unsupported_dmi_parameters(monkeypatch):
         main()
 
     assert exc_info.value.code == 1
-
-
-@pytest.mark.parametrize("interval", [0, -1, float("inf"), float("nan")])
-def test_continuous_execution_requires_positive_interval(interval):
-    with pytest.raises(ValueError, match="greater than zero"):
-        run_continuously(MagicMock(), interval)
-
-
-def test_main_rejects_nonpositive_interval(monkeypatch):
-    monkeypatch.setenv("DMI_API_URL", "http://fake-url.com")
-
-    with pytest.raises(SystemExit) as exc_info:
-        main(["--interval-seconds", "0"])
-
-    assert exc_info.value.code == 2

@@ -2,6 +2,22 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Generic, TypeVar
+
+RecordT = TypeVar("RecordT")
+
+
+@dataclass(frozen=True)
+class TransformResult(Generic[RecordT]):
+    """Transformed records and counts grouped by skip reason."""
+
+    records: list[RecordT]
+    skipped: dict[str, int]
+
+    @property
+    def input_count(self) -> int:
+        """Return the number of input records represented in this result."""
+        return len(self.records) + sum(self.skipped.values())
 
 
 @dataclass(frozen=True)

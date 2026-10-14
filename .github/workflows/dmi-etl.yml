@@ -1,8 +1,6 @@
 name: DMI ETL
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +16,6 @@ jobs:
     timeout-minutes: 15
     env:
       DMI_API_URL: https://opendataapi.dmi.dk/v2/metObs/collections
-      ETL_INTERVAL_SECONDS: ""
       POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
       POSTGRES_PORT: ${{ secrets.POSTGRES_PORT || '5432' }}
       POSTGRES_DB: ${{ secrets.POSTGRES_DB }}

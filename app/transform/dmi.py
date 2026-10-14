@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from app.constants.parameters import ParameterIds
-from app.transform.models import MeasurementDTO
+from app.transform.models import MeasurementDTO, TransformResult
 
 PARAMETER_MAPPING: dict[str, ParameterIds] = {
     "temp_dry": ParameterIds.TEMPERATURE,
@@ -65,9 +65,14 @@ SUPPORTED_DMI_PARAMETER_IDS = tuple(PARAMETER_MAPPING)
 def _transform_feature(
     feature: dict[str, Any],
     source_id: str,
-) -> MeasurementDTO | None:
-    """Convert one supported DMI observation feature to a DTO."""
-    properties = feature.get("properties", {})
+) -> tuple[MeasurementDTO | None, str | None]:
+    """Convert one DMI observation feature, returning a skip reason."""
+    if not isinstance(feature, dict):
+        return None, "invalid_feature"
+    properties = feature.get("properties")
+    if not isinstance(properties, dict):
+        return None, "invalid_properties"
+
     station_id = properties.get("stationId")
     parameter_name = properties.get("parameterId")
     observed_time = properties.get("observed")
@@ -79,17 +84,21 @@ def _transform_feature(
         or observed_time is None
         or value is None
     ):
-        return None
+        return None, "missing_required_fields"
 
     parameter_id = PARAMETER_MAPPING.get(parameter_name)
     if parameter_id is None:
-        return None
+        return None, "unsupported_parameter"
 
     try:
         timestamp = datetime.fromisoformat(
             observed_time.replace("Z", "+00:00")
         )
-        return MeasurementDTO(
+    except (ValueError, TypeError, AttributeError):
+        return None, "invalid_timestamp"
+
+    try:
+        measurement = MeasurementDTO(
             source_id=source_id,
             station_id=str(station_id),
             parameter_id=parameter_id.value,
@@ -97,7 +106,28 @@ def _transform_feature(
             value=float(value),
         )
     except (ValueError, TypeError, AttributeError):
-        return None
+        return None, "invalid_value"
+    return measurement, None
+
+
+def transform_dmi_observations_with_report(
+    raw_json: dict[str, Any],
+    source_id: str,
+) -> TransformResult[MeasurementDTO]:
+    """Transform observations and count records skipped by reason."""
+    measurements = []
+    skipped: dict[str, int] = {}
+    for feature in raw_json.get("features", []):
+        measurement, reason = _transform_feature(feature, source_id)
+        if measurement is None:
+            if reason is None:
+                raise RuntimeError(
+                    "Skipped observation transformation has no reason."
+                )
+            skipped[reason] = skipped.get(reason, 0) + 1
+        else:
+            measurements.append(measurement)
+    return TransformResult(records=measurements, skipped=skipped)
 
 
 def transform_dmi_observations(
@@ -105,9 +135,7 @@ def transform_dmi_observations(
     source_id: str,
 ) -> list[MeasurementDTO]:
     """Normalize supported observations from a DMI API response."""
-    measurements = []
-    for feature in raw_json.get("features", []):
-        measurement = _transform_feature(feature, source_id)
-        if measurement is not None:
-            measurements.append(measurement)
-    return measurements
+    return transform_dmi_observations_with_report(
+        raw_json,
+        source_id,
+    ).records

@@ -1,12 +1,7 @@
 """Application entry point for the environmental data pipeline."""
 
-import argparse
-import logging
-import math
 import os
 import sys
-import time
-from collections.abc import Callable, Sequence
 from functools import partial
 
 from app.extract import DMIDataSource
@@ -45,72 +40,8 @@ def _configured_parameter_ids() -> tuple[str, ...]:
     return parameter_ids
 
 
-def _positive_interval(value: str) -> float:
-    """Parse a finite, positive pipeline interval in seconds."""
-    try:
-        interval = float(value)
-    except ValueError as err:
-        raise argparse.ArgumentTypeError(
-            "interval must be a finite, positive number of seconds"
-        ) from err
-
-    if not math.isfinite(interval) or interval <= 0:
-        raise argparse.ArgumentTypeError(
-            "interval must be a finite, positive number of seconds"
-        )
-    return interval
-
-
-def run_continuously(
-    run_once: Callable[[], int],
-    interval_seconds: float,
-) -> None:
-    """Run a pipeline repeatedly, reporting failures before retrying."""
-    if not math.isfinite(interval_seconds) or interval_seconds <= 0:
-        raise ValueError(
-            "interval_seconds must be finite and greater than zero."
-        )
-
-    while True:
-        try:
-            measurement_count = run_once()
-            print(
-                "ETL cycle completed: "
-                f"{measurement_count} observations processed.",
-                flush=True,
-            )
-        except Exception:
-            logging.exception(
-                "Pipeline execution failed; it will be retried."
-            )
-        time.sleep(interval_seconds)
-
-
-def main(argv: Sequence[str] = ()) -> None:
-    """Initialize and run one-shot or continuous pipeline execution."""
-    parser = argparse.ArgumentParser(description="Run the DMI ETL pipeline.")
-    parser.add_argument(
-        "--interval-seconds",
-        type=_positive_interval,
-        default=None,
-        help=(
-            "Repeat the pipeline at this interval. "
-            "Defaults to ETL_INTERVAL_SECONDS, or one-shot execution."
-        ),
-    )
-    args = parser.parse_args(argv)
-    interval_seconds = args.interval_seconds
-    configured_interval = os.environ.get("ETL_INTERVAL_SECONDS")
-    if interval_seconds is None and configured_interval:
-        try:
-            interval_seconds = _positive_interval(configured_interval)
-        except argparse.ArgumentTypeError as err:
-            parser.error(str(err))
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+def main() -> None:
+    """Initialize and run one ETL pipeline cycle."""
     print("=== Starting Environmental Data ETL Pipeline ===", flush=True)
 
     try:
@@ -141,20 +72,12 @@ def main(argv: Sequence[str] = ()) -> None:
             parameter_ids=parameter_ids,
         )
 
-        if interval_seconds is None:
-            measurement_count = run_pipeline()
-            print(
-                "ETL cycle completed: "
-                f"{measurement_count} observations processed.",
-                flush=True,
-            )
-        else:
-            logging.info(
-                "Continuous execution enabled; interval is %s seconds.",
-                interval_seconds,
-            )
-            run_continuously(run_pipeline, interval_seconds)
-
+        measurement_count = run_pipeline()
+        print(
+            "ETL cycle completed: "
+            f"{measurement_count} observations processed.",
+            flush=True,
+        )
         print("=== ETL Pipeline Completed ===")
     except Exception as err:
         print(
@@ -165,4 +88,4 @@ def main(argv: Sequence[str] = ()) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main()

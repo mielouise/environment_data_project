@@ -3,7 +3,6 @@ services:
   app:
     build: .
     container_name: app_service
-    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -15,7 +14,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DMI_API_URL: ${DMI_API_URL}
       DMI_PARAMETER_IDS: ${DMI_PARAMETER_IDS:-}
-      ETL_INTERVAL_SECONDS: ${ETL_INTERVAL_SECONDS:-300}
 
   tests:
     build: .
@@ -31,7 +29,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DMI_API_URL: ${DMI_API_URL}
       DMI_PARAMETER_IDS: ${DMI_PARAMETER_IDS:-}
-      ETL_INTERVAL_SECONDS: ${ETL_INTERVAL_SECONDS:-}
     command: pytest --cov=app
 
   db:

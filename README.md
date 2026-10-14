@@ -33,7 +33,7 @@ integration tests.
   including categorical weather and snow-cover codes
 - Store source metadata, station locations, and measurements in PostgreSQL
 - Apply versioned SQL migrations automatically at startup
-- Optionally repeat the DMI pipeline at a configurable interval
+- Run one ETL cycle per application invocation
 - Run unit and integration tests with Pytest
 - Use Docker Compose for local development and execution
 - Manage the database through pgAdmin
@@ -79,6 +79,11 @@ Review `.env` and replace the example passwords before using the project
 outside local development. `.env` is ignored by Git; do not commit real
 credentials.
 
+The ETL application requires `DMI_API_URL` and the five `POSTGRES_*`
+variables. The pgAdmin variables are needed only when starting the `pgadmin`
+service. `DMI_PARAMETER_IDS` is optional and defaults to a selective set of
+temperature, humidity, wind-speed, and precipitation observations.
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DMI_API_URL` | Yes | DMI collections URL, for example `https://opendataapi.dmi.dk/v2/metObs/collections`. The application appends the selected collection and `/items` path. For a local API, set its reachable collections URL here. |
@@ -90,7 +95,6 @@ credentials.
 | `PGADMIN_USER_EMAIL` | For pgAdmin | Email address used to sign in to pgAdmin. |
 | `PGADMIN_PASSWORD` | For pgAdmin | pgAdmin sign-in password. |
 | `DMI_PARAMETER_IDS` | No | Comma-separated DMI parameter IDs. Leave blank to use the selective default: `temp_dry,humidity,wind_speed,precip_past1h`. |
-| `ETL_INTERVAL_SECONDS` | No | Repeat interval in seconds. Docker Compose defaults to 300 seconds; set blank for one-shot execution. |
 
 The application builds the observation and station item endpoints from
 `DMI_API_URL` in code. Use the collections URL shown above; the application
@@ -131,25 +135,18 @@ catalogue](https://opendataapi.dmi.dk/v2/metObs/collections); available
 parameters and units are documented in the [DMI meteorological observations
 catalogue](https://www.dmi.dk/friedata/dokumentation/meteorological-observations-data#c24107).
 
-Docker Compose runs the pipeline immediately and repeats every 300 seconds by
-default, including when `ETL_INTERVAL_SECONDS` is unset or blank. Change the
-variable in `.env` to use another interval. To run a single cycle instead, use:
+Each application invocation runs one ETL cycle, reports the number of
+processed observations, and exits. To run it again, start the command again.
+If malformed or unsupported records are skipped during transformation, the
+application logs a summary by stage and reason, such as missing required
+fields, unsupported parameter, invalid timestamp, or invalid coordinates.
 
-```bash
-docker compose run --rm -e ETL_INTERVAL_SECONDS= app
-```
+### Run ETL manually with GitHub Actions
 
-The pipeline runs immediately and then repeats every 300 seconds. Each
-completed cycle reports its measurement count in the app logs. A failed cycle
-is logged and retried at the next interval. You can also pass
-`--interval-seconds 300` when running `python -m app.main` directly.
-
-### Run ETL on a schedule with GitHub Actions
-
-The `.github/workflows/dmi-etl.yml` workflow runs one ETL cycle every five
-minutes and can also be started manually from the repository's Actions tab.
-Each scheduled run uses a fresh GitHub-hosted runner, so it connects to the
-existing PostgreSQL database; it does not start the local Compose database.
+The `.github/workflows/dmi-etl.yml` workflow can be started manually from the
+repository's Actions tab. It runs one ETL cycle on a fresh GitHub-hosted
+runner, so it connects to the existing PostgreSQL database; it does not start
+the local Compose database. The workflow does not run on a schedule.
 
 Configure these repository Actions secrets before enabling the workflow:
 
@@ -166,7 +163,7 @@ PostgreSQL broadly to the internet; use a network-restricted hosted runner or
 a self-hosted GitHub Actions runner inside the database's trusted network
 when the database firewall cannot securely allow hosted runners. The
 workflow runs a single cycle per invocation, applies any pending migrations,
-and exits. Scheduled runs are serialized to avoid overlapping ETL jobs.
+and exits. Concurrent manual runs are serialized to avoid overlapping ETL jobs.
 Use GitHub repository Actions secrets for all database credentials; do not
 put passwords in the workflow file or commit them to the repository.
 
@@ -445,9 +442,8 @@ classDiagram
 
 ### ETL workflow
 
-The activity diagram below shows the application run, including database
-migrations before the ETL path, optional repeated execution, transactional
-writes, error handling, and connection cleanup.
+The activity diagram below shows one ETL run, including database migrations,
+transactional writes, error handling, and connection cleanup.
 
 ```mermaid
 flowchart TD
@@ -470,12 +466,8 @@ flowchart TD
     Count["Return processed measurement count"]
     ReportSuccess["Report successful completion"]
     ReportFailure["Log error and exit<br/>with failure status"]
-    CycleFailure["Log cycle failure"]
     Cleanup["Close database connection"]
     FailureCleanup["Close database connection if opened"]
-    Continuous{"Continuous interval configured?"}
-    Retry{"Continuous execution enabled?"}
-    Wait["Wait for configured interval"]
     End((End))
 
     Start --> ReadURL --> HasURL
@@ -487,26 +479,22 @@ flowchart TD
     SaveSource --> SaveStations --> SaveMeasurements --> HasRecords
     HasRecords -->|Yes| WriteRecords --> Count
     HasRecords -->|No| NoRecords --> Count
-    Count --> ReportSuccess --> Cleanup --> Continuous
-    Continuous -->|No| End
-    Continuous -->|Yes| Wait --> FetchStations
+    Count --> ReportSuccess --> Cleanup --> End
     HasURL -->|No| ReportFailure
     ReportFailure --> End
 
     BuildSource -. error .-> ReportFailure
     InitSchema -. error .-> ReportFailure
-    FetchStations -. error .-> CycleFailure
-    Fetch -. error .-> CycleFailure
-    TransformStations -. error .-> CycleFailure
-    Transform -. error .-> CycleFailure
-    Connect -. error .-> CycleFailure
-    SaveSource -. error .-> CycleFailure
-    SaveStations -. error .-> CycleFailure
-    SaveMeasurements -. error .-> CycleFailure
-    WriteRecords -. error .-> CycleFailure
-    CycleFailure --> FailureCleanup --> Retry
-    Retry -->|Yes| Wait
-    Retry -->|No| ReportFailure
+    FetchStations -. error .-> ReportFailure
+    Fetch -. error .-> ReportFailure
+    TransformStations -. error .-> ReportFailure
+    Transform -. error .-> ReportFailure
+    Connect -. error .-> ReportFailure
+    SaveSource -. error .-> FailureCleanup --> ReportFailure
+    SaveStations -. error .-> FailureCleanup
+    SaveMeasurements -. error .-> FailureCleanup
+    WriteRecords -. error .-> FailureCleanup
+    FailureCleanup --> ReportFailure
 
     classDef terminal fill:#0f766e,color:#ffffff,stroke:#115e59,stroke-width:2px
     classDef action fill:#eff6ff,color:#0f172a,stroke:#2563eb,stroke-width:1.5px
@@ -515,8 +503,8 @@ flowchart TD
     classDef failure fill:#fee2e2,color:#7f1d1d,stroke:#dc2626,stroke-width:1.5px
 
     class Start,End terminal
-    class InitSchema,ReadURL,BuildSource,Connect,Fetch,Transform,TransformStations,FetchStations,SaveSource,SaveStations,SaveMeasurements,WriteRecords,NoRecords,Count,Cleanup,FailureCleanup,Wait,CycleFailure action
-    class HasURL,HasRecords,Continuous,Retry decision
+    class InitSchema,ReadURL,BuildSource,Connect,Fetch,Transform,TransformStations,FetchStations,SaveSource,SaveStations,SaveMeasurements,WriteRecords,NoRecords,Count,Cleanup,FailureCleanup action
+    class HasURL,HasRecords decision
     class ReportSuccess success
     class ReportFailure failure
 ```
@@ -532,11 +520,9 @@ The workflow proceeds as follows:
 5. Save source metadata, station metadata, and measurements in one database
    transaction. A failed load rolls back all of its writes and closes the
    connection.
-6. Report the number of processed measurements and close the database
-   connection. If continuous execution is enabled, wait for the configured
-   interval and repeat from step 4 with a fresh connection.
-7. If setup fails, report the error and exit. In continuous mode, a failed
-   cycle is logged and retried after the configured interval.
+6. Report the number of processed measurements, close the database connection,
+   and exit. To collect data again, start another application invocation.
+7. If setup or processing fails, report the error and exit.
 
 #### Database migrations
 

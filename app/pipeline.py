@@ -1,5 +1,6 @@
 """Concrete ETL pipeline definitions."""
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from functools import partial
@@ -9,14 +10,43 @@ from app.database import get_db_connection
 from app.extract import SensorDataSource
 from app.load import MeasurementRepository
 from app.transform import (
-    transform_dmi_observations,
-    transform_dmi_stations,
+    TransformResult,
+    transform_dmi_observations_with_report,
+    transform_dmi_stations_with_report,
 )
 
 DENMARK_BBOX = "7,54,16,58"
 DEFAULT_LOOKBACK_HOURS = 24
 DEFAULT_PAGE_SIZE = 1000
 MAX_CONCURRENT_PARAMETER_REQUESTS = 5
+logger = logging.getLogger(__name__)
+
+
+def _log_transform_result(
+    stage: str,
+    result: TransformResult[Any],
+) -> None:
+    """Log transformed and skipped record counts for one ETL stage."""
+    skipped_count = sum(result.skipped.values())
+    if result.skipped:
+        reasons = ", ".join(
+            f"{reason}={count}"
+            for reason, count in sorted(result.skipped.items())
+        )
+        logger.warning(
+            "%s transformation skipped %s of %s records: %s",
+            stage,
+            skipped_count,
+            result.input_count,
+            reasons,
+        )
+        return
+
+    logger.info(
+        "%s transformation processed %s records; skipped 0.",
+        stage,
+        len(result.records),
+    )
 
 
 def _fetch_parameter_observations(
@@ -78,7 +108,8 @@ def run_dmi_pipeline(
             "limit": DEFAULT_PAGE_SIZE,
         }
     )
-    stations = transform_dmi_stations(station_data)
+    station_result = transform_dmi_stations_with_report(station_data)
+    _log_transform_result("DMI stations", station_result)
 
     fetch_parameter = partial(
         _fetch_parameter_observations,
@@ -94,10 +125,12 @@ def run_dmi_pipeline(
             for feature in features
         ]
 
-    measurements = transform_dmi_observations(
+    measurement_result = transform_dmi_observations_with_report(
         {"features": observation_features},
         source_id=observation_source.source_id,
     )
+    _log_transform_result("DMI observations", measurement_result)
+    measurements = measurement_result.records
 
     connection = get_db_connection()
     try:
@@ -108,7 +141,7 @@ def run_dmi_pipeline(
                 source_name=observation_source.source_name,
                 source_type="API_DMI",
             )
-            repository.save_stations(stations)
+            repository.save_stations(station_result.records)
             repository.save_measurements(measurements)
     finally:
         connection.close()

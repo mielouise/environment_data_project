@@ -2,7 +2,11 @@
 
 from datetime import datetime, timezone
 
-from app.transform import StationDTO, transform_dmi_stations
+from app.transform import (
+    StationDTO,
+    transform_dmi_stations,
+    transform_dmi_stations_with_report,
+)
 
 
 def _station(station_id, valid_from, longitude=8.3327, latitude=55.723):
@@ -61,3 +65,24 @@ def test_transform_stations_skips_invalid_locations():
     invalid = _station("invalid", "2026-01-01T00:00:00Z", longitude=181)
 
     assert transform_dmi_stations({"features": [invalid]}) == []
+
+
+def test_station_transform_report_counts_invalid_and_old_versions():
+    report = transform_dmi_stations_with_report(
+        {
+            "features": [
+                _station("05329", "2020-01-01T00:00:00Z"),
+                _station("05329", "2026-01-01T00:00:00Z"),
+                _station("bad", "2026-01-01T00:00:00Z", longitude=181),
+                {"properties": {}},
+            ]
+        }
+    )
+
+    assert len(report.records) == 1
+    assert report.input_count == 4
+    assert report.skipped == {
+        "superseded_station_version": 1,
+        "invalid_coordinates": 1,
+        "missing_required_fields": 1,
+    }

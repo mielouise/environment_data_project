@@ -8,6 +8,7 @@ from app.constants.parameters import ParameterIds
 from app.transform import (
     MeasurementDTO,
     transform_dmi_observations,
+    transform_dmi_observations_with_report,
 )
 from app.transform.dmi import PARAMETER_MAPPING
 
@@ -112,6 +113,30 @@ def test_unsupported_or_invalid_observations_are_skipped(feature):
         {"features": [feature]},
         source_id="DMI",
     ) == []
+
+
+def test_observation_transform_report_counts_skips_by_reason():
+    report = transform_dmi_observations_with_report(
+        {
+            "features": [
+                _observation("temp_dry"),
+                {"properties": {"parameterId": "temp_dry"}},
+                _observation("unknown_parameter"),
+                _observation("temp_dry", observed="NOT_A_DATE"),
+                _observation("temp_dry", "not-a-number"),
+            ]
+        },
+        source_id="DMI",
+    )
+
+    assert len(report.records) == 1
+    assert report.input_count == 5
+    assert report.skipped == {
+        "missing_required_fields": 1,
+        "unsupported_parameter": 1,
+        "invalid_timestamp": 1,
+        "invalid_value": 1,
+    }
 
 
 def test_transform_multiple_observations():
