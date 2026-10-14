@@ -245,11 +245,15 @@ environment_data_project/
 │   ├── migrations/
 │   │   ├── 0001_initial_schema.sql
 │   │   ├── 0002_station_locations.sql
-│   │   └── 0003_dmi_observation_parameters.sql
+│   │   ├── 0003_dmi_observation_parameters.sql
+│   │   └── 0004_station_name.sql
 │   ├── main.py
 │   └── pipeline.py
 ├── pgadmin/
 │   └── servers.json
+├── .github/
+│   └── workflows/
+│       └── etl.yaml
 ├── tests/
 │   ├── __init__.py
 │   ├── integration/
@@ -271,6 +275,7 @@ environment_data_project/
 ├── .env.example
 ├── Dockerfile
 ├── docker-compose.yml
+├── pyproject.toml
 ├── requirements-dev.txt
 ├── requirements.txt
 └── README.md
@@ -282,14 +287,18 @@ environment_data_project/
   application through `app/main.py`, which configures and runs the pipeline.
 - The `app/extract` directory contains the code for retrieving data from the
   DMI API, including a shared abstraction for data sources.
-- The `app/transform` directory contains pure transformation functions and
-  the measurement data model.
+- The `app/transform` directory contains pure transformation functions,
+  parsing helpers, transformation reports, and measurement and station data
+  models.
 - The `app/load` directory contains persistence components.
 - The `app/constants` directory contains shared constants, including IDs for
   the supported measurement parameters.
 - The `app/migrations` directory contains versioned SQL scripts for creating
   and updating the database schema.
 - `app/pipeline.py` defines the concrete DMI extract-transform-load flow.
+- `.github/workflows/etl.yaml` runs the ETL pipeline hourly and supports
+  manual runs from GitHub Actions.
+- `pyproject.toml` configures Ruff linting and formatting rules.
 - `app/database.py` manages database connections, while
   `app/migration_runner.py` discovers and applies SQL migrations.
 - The `tests` directory contains the test suite, which is run by the `tests`
@@ -408,9 +417,24 @@ classDiagram
 
     class PipelineFunctions {
         <<module functions>>
-        run_dmi_pipeline(observation_source, station_source, parameter_ids) int
-        transform_dmi_observations(raw_json, source_id) list~MeasurementDTO~
-        transform_dmi_stations(raw_json) list~StationDTO~
+        run_dmi_pipeline(observation_source, station_source, parameter_ids, lookback_hours) int
+    }
+
+    class TransformationFunctions {
+        <<module functions>>
+        transform_dmi_observations_with_report(raw_json, source_id) TransformResult
+        transform_dmi_stations_with_report(raw_json) TransformResult
+        _parse_observed_time(value) datetime | None
+        _parse_measurement_value(value) float | None
+        _parse_coordinates(geometry) tuple | None
+        _parse_station_height(properties) float | None
+        _parse_valid_from(value) datetime | None
+    }
+
+    class TransformResult {
+        +records: list
+        +skipped: dict
+        +input_count: int
     }
 
     class MeasurementDTO {
@@ -422,7 +446,7 @@ classDiagram
     }
 
     class MeasurementRepository {
-        -_conn
+        -_connection
         +save_source(source_id, source_name, source_type) None
         +save_stations(stations) None
         +save_measurements(records) None
@@ -445,8 +469,11 @@ classDiagram
 
     PipelineFunctions --> SensorDataSource : extracts observations and stations
     PipelineFunctions --> MeasurementRepository : persists to
-    PipelineFunctions ..> MeasurementDTO : transforms to
-    PipelineFunctions ..> ParameterIds : maps parameter IDs
+    PipelineFunctions ..> TransformationFunctions : transforms fetched data
+    TransformationFunctions ..> StationDTO : transforms station metadata
+    TransformationFunctions ..> MeasurementDTO : transforms observations
+    TransformationFunctions ..> ParameterIds : maps parameter IDs
+    TransformationFunctions ..> TransformResult : reports transformed and skipped records
     MeasurementRepository ..> MeasurementDTO : persists
 ```
 
@@ -463,9 +490,11 @@ flowchart TD
     BuildSource["2. Create DMI data sources and validate configuration"]
     InitSchema["3. Apply pending database migrations"]
     FetchStations["4. Fetch station metadata from DMI"]
-    Fetch["5. Fetch filtered observations from DMI"]
+    Fetch["5. Fetch filtered observations from DMI<br/>concurrently per parameter"]
     TransformStations["Transform station data<br/>into StationDTO records"]
     Transform["Transform observations<br/>into MeasurementDTO records"]
+    ReportStationSkips["Log station transformation counts and skip reasons"]
+    ReportObservationSkips["Log observation transformation counts and skip reasons"]
     Connect["Open a fresh database connection"]
     SaveSource["6. Save DMI source metadata"]
     SaveStations["Save station metadata"]
@@ -482,14 +511,12 @@ flowchart TD
 
     Start --> ReadURL --> HasURL
     HasURL -->|Yes| BuildSource --> InitSchema --> FetchStations
-    FetchStations --> TransformStations
-    FetchStations --> Fetch --> Transform
-    TransformStations --> Connect
-    Transform --> Connect --> SaveSource
+    FetchStations --> TransformStations --> ReportStationSkips --> Fetch
+    Fetch --> Transform --> ReportObservationSkips --> Connect --> SaveSource
     SaveSource --> SaveStations --> SaveMeasurements --> HasRecords
     HasRecords -->|Yes| WriteRecords --> Count
     HasRecords -->|No| NoRecords --> Count
-    Count --> ReportSuccess --> Cleanup --> End
+    Count --> Cleanup --> ReportSuccess --> End
     HasURL -->|No| ReportFailure
     ReportFailure --> End
 
@@ -513,7 +540,7 @@ flowchart TD
     classDef failure fill:#fee2e2,color:#7f1d1d,stroke:#dc2626,stroke-width:1.5px
 
     class Start,End terminal
-    class InitSchema,ReadURL,BuildSource,Connect,Fetch,Transform,TransformStations,FetchStations,SaveSource,SaveStations,SaveMeasurements,WriteRecords,NoRecords,Count,Cleanup,FailureCleanup action
+    class InitSchema,ReadURL,BuildSource,Connect,Fetch,Transform,TransformStations,FetchStations,ReportStationSkips,ReportObservationSkips,SaveSource,SaveStations,SaveMeasurements,WriteRecords,NoRecords,Count,Cleanup,FailureCleanup action
     class HasURL,HasRecords decision
     class ReportSuccess success
     class ReportFailure failure
@@ -531,8 +558,11 @@ The workflow proceeds as follows:
    transaction. A failed load rolls back all of its writes and closes the
    connection.
 6. Report the number of processed measurements, close the database connection,
-   and exit. To collect data again, start another application invocation.
+   and exit.
 7. If setup or processing fails, report the error and exit.
+
+GitHub Actions invokes this one-cycle pipeline once per hour. Each scheduled or
+manual workflow run starts a fresh application invocation.
 
 #### Database migrations
 
@@ -547,12 +577,12 @@ applying the same migration simultaneously.
 The initial migration creates the original schema using idempotent
 statements, so an existing database created by an earlier version of this
 project can adopt migration tracking without dropping its tables or
-measurement data. Later migrations add station metadata and the complete DMI
-parameter catalogue.
+measurement data. Later migrations add station metadata, the complete DMI
+parameter catalogue, and rename the station name column to `station_name`.
 
 After a migration has been committed, do not edit or rename it. To change the
 schema, add a new migration file with the next version, such as
-`0004_add_station_history.sql`. This preserves a consistent upgrade path for
+`0005_add_station_history.sql`. This preserves a consistent upgrade path for
 existing installations.
 
 ### Database design
@@ -642,8 +672,12 @@ erDiagram
     DIM_STATIONS {
         VARCHAR station_id PK "DMI station identifier"
         VARCHAR station_name "Station name"
+        VARCHAR station_type "Station type"
+        VARCHAR country_code "ISO 3166-1 alpha-3"
         DOUBLE latitude "WGS84 latitude"
         DOUBLE longitude "WGS84 longitude"
+        DOUBLE station_height "Height in meters"
+        TIMESTAMPTZ valid_from "Station metadata validity"
     }
 
     FACT_MEASUREMENTS {
