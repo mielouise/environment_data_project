@@ -15,6 +15,7 @@ integration tests.
 - [Features](#features)
 - [Technology stack](#technology-stack)
 - [Getting started](#getting-started)
+- [CI/CD and merge policy](#cicd-and-merge-policy)
 - [Project structure](#project-structure)
 - [File overview](#file-overview)
 - [Architecture](#architecture)
@@ -182,6 +183,97 @@ The test service waits for PostgreSQL to become healthy. Integration tests
 connect to the configured PostgreSQL database and make a real request to the
 DMI API, so the corresponding environment variables must be configured and
 the environment must have network access to DMI.
+
+---
+
+## CI/CD and merge policy
+
+`.github/workflows/ci.yml` runs on every pull request targeting `main`, every
+push to `main` (including merges), merge queue checks, and manual dispatch.
+The required check is named **`CI quality (Docker)`**. It runs on a
+GitHub-hosted Ubuntu runner using the existing Docker Compose setup:
+
+1. Build both the runtime image and the test image.
+2. Check Ruff lint rules and formatting.
+3. Run all unit tests with **at least 95% coverage** of `app`.
+4. Start a healthy, disposable PostgreSQL 16 instance and test connectivity,
+   all SQL migrations (including a second application), repository writes,
+   duplicate prevention, and foreign-key integrity.
+5. On `main`, export the verified runtime image as a downloadable Actions
+   artifact named `environment-data-<commit SHA>`, retained for 14 days.
+
+Any failing command fails the check. Containers and test database volumes
+are removed even after failures. CI uses the committed `.env.example` and
+requires no production credentials. The runtime image contains only runtime
+dependencies and application code; the `test` Dockerfile stage adds test
+tools, configuration, and tests. This keeps Python, dependencies, and the
+database consistent with local development while using GitHub's managed
+runner infrastructure. Docker adds build time, but avoids maintaining a
+second Python/PostgreSQL setup specifically for CI.
+
+### Required GitHub settings
+
+**Workflow files alone do not block merges.** A repository administrator must
+activate a branch protection rule for `main` under
+**Settings → Branches → Add classic branch protection rule**:
+
+- Require a pull request before merging, with one approving review.
+- Dismiss stale approvals when new commits are pushed.
+- Require status checks before merging: select **`CI quality (Docker)`**
+  from GitHub Actions after its first run.
+- Require branches to be up to date before merging.
+- Require conversation resolution before merging.
+- Do not allow bypassing the above settings (including administrators).
+- Keep force pushes and branch deletion disabled.
+
+The rule must be enabled in GitHub; this document does not enable it.
+Passing tests alone cannot establish correctness: reviewers also check
+changes to data interpretation, configuration, immutable migrations, and
+operational impact. Lint, formatting, coverage, a successful Docker build,
+and real PostgreSQL checks provide additional automated criteria.
+
+### External DMI availability
+
+Unit tests mock DMI responses. The live DMI integration test runs separately
+in `.github/workflows/dmi-smoke.yml`, daily at 06:17 UTC and on manual
+dispatch. It reports failures normally, but is not a required merge check:
+an upstream service outage should be investigated without blocking
+unrelated changes. The full local test command still includes this test.
+
+### Continuous delivery
+
+The project uses **continuous delivery**, with a tested Docker image ready
+for manual release, rather than automatic deployment after every merge.
+ETL runs write persistent data and automatically apply migrations. A person
+should review migration compatibility, backups, credentials, and the target
+database before releasing a new version. CI never accesses that database.
+
+After a successful `main` run, download and extract its image artifact from
+the Actions page, then load the image on the deployment host:
+
+```bash
+docker load --input environment-data.tar.gz
+docker run --rm --env-file deployment.env environment-data:<commit-SHA>
+```
+
+Replace `<commit-SHA>` with the full SHA shown on the successful run.
+`deployment.env` must contain the documented application variables and a
+PostgreSQL host reachable from that container. The command performs one ETL
+cycle and applies pending migrations; schedule subsequent cycles on the
+deployment host as needed. Release the downloaded image to preserve the
+tested version instead of rebuilding it. Download it before the 14-day
+artifact expires or retain it in your own release storage.
+
+The existing `etl.yaml` workflow is a separate hourly operational ETL run
+using its configured secrets. It checks out a full commit SHA from the
+repository Actions variable `ETL_RELEASE_SHA`. To promote a release, set that
+variable under **Settings → Secrets and variables → Actions → Variables**
+to a reviewed, successful `main` commit. Until it is set, the workflow keeps
+using `0f094b199400f128032f70687233797557be5ecf`, the version present when CI
+was introduced. This prevents each future merge from automatically changing
+the scheduled ETL code. This runner-based execution installs the pinned
+runtime requirements; it does not consume the Docker artifact. It is not a
+merge check.
 
 ---
 
@@ -720,3 +812,4 @@ After completing this project, participants should be able to:
 **Mie Louise Nielsen**
 
 GitHub: https://github.com/mielouise
+

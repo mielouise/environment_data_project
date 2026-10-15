@@ -1,0 +1,29 @@
+name: DMI API smoke test
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dmi:
+    name: Live DMI availability
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Configure test environment
+        run: cp .env.example .env
+      - name: Run live DMI integration test
+        run: >-
+          docker compose run --build --rm --no-deps tests
+          pytest tests/integration/test_dmi_api.py -v
+      - name: Clean up containers
+        if: always()
+        run: docker compose down --volumes --remove-orphans

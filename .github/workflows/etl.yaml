@@ -16,9 +16,22 @@ jobs:
   etl:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Freeze the current version until a tested main commit is promoted manually.
+      RELEASE_SHA: ${{ vars.ETL_RELEASE_SHA || '0f094b199400f128032f70687233797557be5ecf' }}
     steps:
+      - name: Validate released commit
+        run: |
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ETL_RELEASE_SHA must contain a full, reviewed commit SHA."
+            exit 1
+          fi
+
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,3 +50,4 @@ jobs:
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
         run: python -m app.main
+

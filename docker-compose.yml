@@ -1,7 +1,10 @@
 services:
 
   app:
-    build: .
+    image: environment-data:${IMAGE_TAG:-local}
+    build:
+      context: .
+      target: runtime
     container_name: app_service
     depends_on:
       db:
@@ -16,7 +19,9 @@ services:
       DMI_PARAMETER_IDS: ${DMI_PARAMETER_IDS:-}
 
   tests:
-    build: .
+    build:
+      context: .
+      target: test
     container_name: test_service
     depends_on:
       db:
