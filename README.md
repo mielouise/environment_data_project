@@ -122,7 +122,7 @@ DMI observation catalogue does not include the legacy CO2 and PM2.5 database
 parameters. The default selection is intentionally narrow to keep request
 volume manageable; expand it with `DMI_PARAMETER_IDS` when the downstream use
 case requires additional measurements. Each application invocation is a
-one-shot run. The GitHub Actions workflow runs it automatically once per hour.
+one-shot run.
 
 Set `DMI_PARAMETER_IDS` to any comma-separated subset of documented parameter
 identifiers to change the selection and reduce API traffic further:
@@ -144,36 +144,8 @@ Each application invocation runs one ETL cycle, reports the number of
 processed observations, and exits. To run it again, start the command again.
 If malformed or unsupported records are skipped during transformation, the
 application logs a summary by stage and reason, such as missing required
-fields, unsupported parameter, invalid timestamp, or invalid coordinates.
-
-### Run ETL continuously with GitHub Actions
-
-The `.github/workflows/etl.yaml` workflow runs the ETL once every hour, at the
-start of the hour (UTC), and can also be started manually from the repository's
-Actions tab. Each run uses a fresh GitHub-hosted runner and connects to the
-existing PostgreSQL database; it does not start the local Compose database.
-GitHub may delay scheduled runs during periods of high load.
-
-Configure these repository Actions secrets before enabling the workflow.
-These settings are for the GitHub-hosted runner, not local Docker Compose:
-
-| Secret | Description |
-|--------|-------------|
-| `DMI_API_URL` | Short DMI API base URL, for example `https://opendataapi.dmi.dk`. The application adds the API version, collection, and endpoint paths. |
-| `POSTGRES_HOST` | Hostname of the existing PostgreSQL server. This must be the hosted database's reachable hostname, not `db` (which only resolves inside Docker Compose). |
-| `POSTGRES_PORT` | PostgreSQL port; optional, defaults to `5432`. |
-| `POSTGRES_DB` | Database name. |
-| `POSTGRES_USER` | Database user. |
-| `POSTGRES_PASSWORD` | Database password. |
-
-The database must accept connections from the runner. Avoid exposing
-PostgreSQL broadly to the internet; use a network-restricted hosted runner or
-a self-hosted GitHub Actions runner inside the database's trusted network
-when the database firewall cannot securely allow hosted runners. The
-workflow runs a single cycle per invocation, applies any pending migrations,
-and exits. Workflow runs are serialized to avoid overlapping ETL jobs.
-Use GitHub repository Actions secrets for all database credentials; do not
-put passwords in the workflow file or commit them to the repository.
+fields, `missing_station_id`, unsupported parameter, invalid timestamp, or
+invalid coordinates.
 
 To start PostgreSQL and pgAdmin for database inspection:
 
@@ -244,14 +216,12 @@ environment_data_project/
 │   │   ├── 0001_initial_schema.sql
 │   │   ├── 0002_station_locations.sql
 │   │   ├── 0003_dmi_observation_parameters.sql
-│   │   └── 0004_station_name.sql
+│   │   ├── 0004_station_name.sql
+│   │   └── 0005_require_measurement_station.sql
 │   ├── main.py
 │   └── pipeline.py
 ├── pgadmin/
 │   └── servers.json
-├── .github/
-│   └── workflows/
-│       └── etl.yaml
 ├── tests/
 │   ├── __init__.py
 │   ├── integration/
@@ -294,8 +264,6 @@ environment_data_project/
 - The `app/migrations` directory contains versioned SQL scripts for creating
   and updating the database schema.
 - `app/pipeline.py` defines the concrete DMI extract-transform-load flow.
-- `.github/workflows/etl.yaml` runs the ETL pipeline hourly and supports
-  manual runs from GitHub Actions.
 - `pyproject.toml` configures Ruff linting and formatting rules.
 - `app/database.py` manages database connections, while
   `app/migration_runner.py` discovers and applies SQL migrations.
@@ -463,6 +431,8 @@ classDiagram
         PM25
     }
 
+    note for ParameterIds "Only selected values shown; ..."
+
     SensorDataSource <|-- DMIDataSource
 
     PipelineFunctions --> SensorDataSource : extracts observations and stations
@@ -483,24 +453,21 @@ transactional writes, error handling, and connection cleanup.
 ```mermaid
 flowchart TD
     Start((Start))
-    ReadURL["1. Read DMI_API_URL"]
+    ReadURL["1. Configuration: Read and validate DMI_API_URL"]
     HasURL{"API URL configured?"}
-    BuildSource["2. Create DMI data sources and validate configuration"]
-    InitSchema["3. Apply pending database migrations"]
-    FetchStations["4. Fetch station metadata from DMI"]
-    Fetch["5. Fetch filtered observations from DMI<br/>concurrently per parameter"]
-    TransformStations["Transform station data<br/>into StationDTO records"]
-    Transform["Transform observations<br/>into MeasurementDTO records"]
-    ReportStationSkips["Log station transformation counts and skip reasons"]
-    ReportObservationSkips["Log observation transformation counts and skip reasons"]
-    Connect["Open a fresh database connection"]
-    SaveSource["6. Save DMI source metadata"]
+    BuildSource["Create DMI data sources and validate parameters"]
+    InitSchema["2. Database setup: Apply pending migrations"]
+    FetchStations["3. EXTRACT: Fetch station metadata from DMI"]
+    TransformStations["4. TRANSFORM: Convert station data<br/>into StationDTO records"]
+    Fetch["5. EXTRACT: Fetch filtered observations<br/>concurrently per parameter"]
+    Transform["6. TRANSFORM: Convert observations<br/>into MeasurementDTO records"]
+    ReportStationSkips["Log transformed/skipped station counts<br/>and reasons for skipped records"]
+    ReportObservationSkips["Log transformed/skipped observation counts<br/>and reasons for skipped records"]
+    Connect["7. LOAD: Open a database connection"]
+    SaveSource["Save DMI source metadata"]
     SaveStations["Save station metadata"]
-    SaveMeasurements["7. Save measurement records"]
-    HasRecords{"Any measurements?"}
-    WriteRecords["Insert or update measurements<br/>in PostgreSQL"]
-    NoRecords["No measurement rows to write"]
-    Count["Return processed measurement count"]
+    SaveMeasurements["Save measurements<br/>(no-op if there are none)"]
+    Count["8. Completion: Return processed measurement count"]
     ReportSuccess["Report successful completion"]
     ReportFailure["Log error and exit<br/>with failure status"]
     Cleanup["Close database connection"]
@@ -511,9 +478,7 @@ flowchart TD
     HasURL -->|Yes| BuildSource --> InitSchema --> FetchStations
     FetchStations --> TransformStations --> ReportStationSkips --> Fetch
     Fetch --> Transform --> ReportObservationSkips --> Connect --> SaveSource
-    SaveSource --> SaveStations --> SaveMeasurements --> HasRecords
-    HasRecords -->|Yes| WriteRecords --> Count
-    HasRecords -->|No| NoRecords --> Count
+    SaveSource --> SaveStations --> SaveMeasurements --> Count
     Count --> Cleanup --> ReportSuccess --> End
     HasURL -->|No| ReportFailure
     ReportFailure --> End
@@ -528,7 +493,6 @@ flowchart TD
     SaveSource -. error .-> FailureCleanup --> ReportFailure
     SaveStations -. error .-> FailureCleanup
     SaveMeasurements -. error .-> FailureCleanup
-    WriteRecords -. error .-> FailureCleanup
     FailureCleanup --> ReportFailure
 
     classDef terminal fill:#0f766e,color:#ffffff,stroke:#115e59,stroke-width:2px
@@ -538,29 +502,29 @@ flowchart TD
     classDef failure fill:#fee2e2,color:#7f1d1d,stroke:#dc2626,stroke-width:1.5px
 
     class Start,End terminal
-    class InitSchema,ReadURL,BuildSource,Connect,Fetch,Transform,TransformStations,FetchStations,ReportStationSkips,ReportObservationSkips,SaveSource,SaveStations,SaveMeasurements,WriteRecords,NoRecords,Count,Cleanup,FailureCleanup action
-    class HasURL,HasRecords decision
+    class InitSchema,ReadURL,BuildSource,Connect,Fetch,Transform,TransformStations,FetchStations,ReportStationSkips,ReportObservationSkips,SaveSource,SaveStations,SaveMeasurements,Count,Cleanup,FailureCleanup action
+    class HasURL decision
     class ReportSuccess success
     class ReportFailure failure
 ```
 
 The workflow proceeds as follows:
 
-1. Apply pending database migrations to create or update the database schema.
-2. Read the short `DMI_API_URL` base URL and build the versioned observation
-   and station item endpoints.
-3. Create data sources for DMI observations and station metadata.
-4. Fetch stations and filtered observations, then transform them into station
-   and measurement records before opening a database connection.
-5. Save source metadata, station metadata, and measurements in one database
-   transaction. A failed load rolls back all of its writes and closes the
-   connection.
-6. Report the number of processed measurements, close the database connection,
-   and exit.
-7. If setup or processing fails, report the error and exit.
-
-GitHub Actions invokes this one-cycle pipeline once per hour. Each scheduled or
-manual workflow run starts a fresh application invocation.
+1. **Configuration:** Read and validate `DMI_API_URL`, create the observation
+   and station data sources, and validate the selected parameter IDs.
+2. **Database setup:** Apply pending migrations to create or update the schema.
+3. **Extract stations:** Fetch station metadata from DMI.
+4. **Transform stations:** Convert the fetched metadata into station records.
+5. **Extract observations:** Fetch observations concurrently for the selected
+   parameters.
+6. **Transform observations:** Convert the fetched data into measurement
+   records.
+7. **Load:** Save source metadata, station metadata, and measurements in one
+   database transaction. The repository skips measurement SQL when there are
+   no measurements. A failed load rolls back its writes.
+8. **Completion:** Close the database connection, report the number of
+   processed measurements, and exit. If setup or processing fails, report the
+   error and exit with a failure status.
 
 #### Database migrations
 
@@ -576,11 +540,37 @@ The initial migration creates the original schema using idempotent
 statements, so an existing database created by an earlier version of this
 project can adopt migration tracking without dropping its tables or
 measurement data. Later migrations add station metadata, the complete DMI
-parameter catalogue, and rename the station name column to `station_name`.
+parameter catalogue, rename the station name column to `station_name`, and
+require each measurement to reference a station.
+
+Before applying `0005_require_measurement_station.sql` to an existing database,
+check for measurements without a station:
+
+```sql
+SELECT COUNT(*)
+FROM fact_measurements
+WHERE station_id IS NULL;
+```
+
+If the count is not zero, identify and resolve those records using a reliable
+source for their station IDs before applying the migration. The migration
+deliberately fails rather than assigning or deleting station data
+automatically.
+
+After confirming the count is zero, start the application to apply pending
+migrations:
+
+```bash
+docker compose up --build app
+```
+
+Migrations run automatically during application startup, before the ETL cycle.
+There is currently no migration-only command, so this also runs one ETL cycle
+and requires valid DMI and database configuration.
 
 After a migration has been committed, do not edit or rename it. To change the
 schema, add a new migration file with the next version, such as
-`0005_add_station_history.sql`. This preserves a consistent upgrade path for
+`0006_add_station_history.sql`. This preserves a consistent upgrade path for
 existing installations.
 
 ### Database design
@@ -681,7 +671,7 @@ erDiagram
     FACT_MEASUREMENTS {
         SERIAL measurement_id PK "Measurement identifier"
         VARCHAR source_id FK "References DIM_SOURCES"
-        VARCHAR station_id FK "References DIM_STATIONS"
+        VARCHAR station_id FK "NOT NULL; references DIM_STATIONS"
         INTEGER parameter_id FK "References DIM_PARAMETERS"
         TIMESTAMPTZ timestamp "Observation time"
         NUMERIC value "Measurement value"

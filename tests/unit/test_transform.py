@@ -132,7 +132,7 @@ def test_observation_transform_report_counts_skips_by_reason():
     assert len(report.records) == 1
     assert report.input_count == 5
     assert report.skipped == {
-        "missing_required_fields": 1,
+        "missing_station_id": 1,
         "unsupported_parameter": 1,
         "invalid_timestamp": 1,
         "invalid_value": 1,

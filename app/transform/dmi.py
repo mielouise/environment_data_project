@@ -96,9 +96,11 @@ def _transform_feature(
     observed_time = properties.get("observed")
     value = properties.get("value")
 
+    if station_id is None:
+        return None, "missing_station_id"
+
     if (
         parameter_name is None
-        or station_id is None
         or observed_time is None
         or value is None
     ):

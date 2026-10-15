@@ -110,7 +110,7 @@ def test_pipeline_logs_counts_and_reasons_for_skipped_records(
 
     assert "DMI observations skipped 2 of 2 records" in caplog.text
     assert "'unsupported_parameter': 1" in caplog.text
-    assert "'missing_required_fields': 1" in caplog.text
+    assert "'missing_station_id': 1" in caplog.text
     assert "WARNING" in caplog.text
     repository.save_measurements.assert_called_once_with([])
 
