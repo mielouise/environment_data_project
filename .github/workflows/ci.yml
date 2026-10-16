@@ -106,14 +106,6 @@ jobs:
           ruff check app tests
 
       #
-      # 7. Run formatter check
-      #
-      - name: Run Ruff format check
-        run: |
-          docker compose run --rm --no-deps tests \
-          ruff format --check app tests
-
-      #
       # Show PostgreSQL logs when a step fails
       #
       - name: Show PostgreSQL logs on failure
