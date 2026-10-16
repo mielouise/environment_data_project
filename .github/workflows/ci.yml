@@ -6,6 +6,15 @@ on:
   push:
     branches: [main]
   merge_group:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+  merge_group:
+
   workflow_dispatch:
 
 permissions:
