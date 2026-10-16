@@ -99,11 +99,7 @@ def _transform_feature(
     if station_id is None:
         return None, "missing_station_id"
 
-    if (
-        parameter_name is None
-        or observed_time is None
-        or value is None
-    ):
+    if parameter_name is None or observed_time is None or value is None:
         return None, "missing_required_fields"
 
     parameter_id = PARAMETER_MAPPING.get(parameter_name)
