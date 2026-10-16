@@ -1,39 +1,106 @@
-name: Environmental Data ETL
+name: CI
 
 on:
-  schedule:
-    - cron: "0 * * * *"
-  workflow_dispatch:
-
-concurrency:
-  group: dmi-etl
-  cancel-in-progress: false
-
-permissions:
-  contents: read
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  etl:
+  validate:
+
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Create environment file
+        run: |
+          cat << EOF > .env
+          POSTGRES_HOST=db
+          POSTGRES_PORT=5432
 
-      - name: Install runtime dependencies
-        run: python -m pip install -r requirements.txt
+          POSTGRES_DB=test_db
+          POSTGRES_USER=test_user
+          POSTGRES_PASSWORD=test_password
 
-      - name: Run one ETL cycle
-        env:
-          DMI_API_URL: ${{ secrets.DMI_API_URL }}
-          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
-          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT || '5432' }}
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-        run: python -m app.main
+          DMI_API_URL=https://opendataapi.dmi.dk/v2/metObs/collections
+          DMI_PARAMETER_IDS=temp_dry,humidity,wind_speed
+
+          PGADMIN_USER_EMAIL=test@example.com
+          PGADMIN_PASSWORD=testpassword
+          EOF
+
+      #
+      # 1. Byg Docker-image
+      #
+      - name: Build containers
+        run: |
+          docker compose build
+
+      #
+      # 2. Start PostgreSQL-container
+      #
+      - name: Start PostgreSQL
+        run: |
+          docker compose up -d db
+
+      #
+      # Vent på at PostgreSQL er klar
+      #
+      - name: Wait for PostgreSQL
+        run: |
+          until docker compose exec -T db pg_isready \
+            -U test_user \
+            -d test_db
+          do
+            sleep 2
+          done
+
+      #
+      # 3. Kør migrations
+      #
+      - name: Run database migrations
+        run: |
+          docker compose run --rm app \
+          python -m app.migration_runner
+
+      #
+      # 4. Kør unit tests
+      #
+      - name: Run unit tests
+        run: |
+          docker compose run --rm tests \
+          pytest tests/unit
+
+      #
+      # 5. Kør integration tests
+      #
+      - name: Run integration tests
+        run: |
+          docker compose run --rm tests \
+          pytest tests/integration
+
+      #
+      # 6. Kør linting
+      #
+      - name: Run Ruff
+        run: |
+          docker compose run --rm tests \
+          ruff check .
+
+      #
+      # 7. Kør formatter check
+      #
+      - name: Run Black
+        run: |
+          docker compose run --rm tests \
+          black --check .
+
+      #
+      # Oprydning
+      #
+      - name: Shutdown services
+        if: always()
+        run: |
+          docker compose down -v
