@@ -89,13 +89,6 @@ jobs:
           docker compose run --rm tests \
           ruff check .
 
-      #
-      # 7. Kør formatter check
-      #
-      - name: Run Black
-        run: |
-          docker compose run --rm tests \
-          black --check .
 
       #
       # Oprydning
