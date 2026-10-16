@@ -23,7 +23,7 @@ concurrency:
 jobs:
   quality:
 
-    name: quality (docker)
+    name: CI quality (docker)
 
     runs-on: ubuntu-latest
 
