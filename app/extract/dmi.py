@@ -116,7 +116,7 @@ class DMIDataSource(SensorDataSource):
                 if not isinstance(page, dict) or not isinstance(
                     page.get("features"), list
                 ):
-                    raise RuntimeError("DMI API response must contain a features list.")
+                    raise TypeError("DMI API response must contain a features list.")
 
                 if first_page is None:
                     first_page = page
