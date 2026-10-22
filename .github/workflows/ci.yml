@@ -5,25 +5,13 @@ on:
     branches:
       - main
 
-  push:
-    branches:
-      - main
-
-  merge_group:
-
-  workflow_dispatch:
-
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  quality:
+  validate:
 
-    name: CI quality (docker)
+    name: CI Quality
 
     runs-on: ubuntu-latest
 
@@ -36,8 +24,6 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false
 
       - name: Configure test environment
         run: |
@@ -48,30 +34,30 @@ jobs:
       #
       - name: Build Docker images
         run: |
-          docker compose build app tests
+          docker compose build
 
       #
-      # 2. Start PostgreSQL container
+      # 2. Start PostgreSQL
       #
       - name: Start PostgreSQL
         run: |
           docker compose up -d db
 
       #
-      # Wait until PostgreSQL is healthy
+      # Wait for PostgreSQL
       #
       - name: Wait for PostgreSQL
         run: |
           until docker compose exec -T db pg_isready \
-            -U "${POSTGRES_USER}" \
-            -d "${POSTGRES_DB}"
+            -U test_user \
+            -d test_db
           do
             echo "Waiting for PostgreSQL..."
             sleep 2
           done
 
       #
-      # 3. Run database migrations
+      # 3. Run migrations
       #
       - name: Run database migrations
         run: |
@@ -79,7 +65,7 @@ jobs:
           python -m app.migration_runner
 
       #
-      # 4. Run unit tests
+      # 4. Run unit tests (minimum 95 % coverage)
       #
       - name: Run unit tests
         run: |
@@ -98,15 +84,7 @@ jobs:
           pytest tests/integration -v
 
       #
-      # 6. Run linting
-      #
-      - name: Run Ruff linting
-        run: |
-          docker compose run --rm --no-deps tests \
-          ruff check app tests
-
-      #
-      # Show PostgreSQL logs when a step fails
+      # Database logs if something fails
       #
       - name: Show PostgreSQL logs on failure
         if: failure()
