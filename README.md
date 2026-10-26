@@ -2,7 +2,8 @@
 
 A Python ETL application that retrieves environmental observations from the
 Danish Meteorological Institute (DMI), transforms supported measurements, and
-stores them in PostgreSQL.
+stores them in PostgreSQL. A local FastAPI REST API exposes the imported
+measurements, stations, and parameter metadata as JSON.
 
 The project is organized into extraction, transformation, and persistence
 components, with versioned database migrations and automated unit and
@@ -15,6 +16,7 @@ integration tests.
 - [Features](#features)
 - [Technology stack](#technology-stack)
 - [Getting started](#getting-started)
+- [Local REST API](#local-rest-api)
 - [Project structure](#project-structure)
 - [File overview](#file-overview)
 - [Architecture](#architecture)
@@ -34,6 +36,8 @@ integration tests.
 - Store source metadata, station locations, and measurements in PostgreSQL
 - Apply versioned SQL migrations automatically at startup
 - Run one ETL cycle per application invocation
+- Query imported DMI data through a versioned REST API with filters and pagination
+- Explore and call endpoints through generated Swagger/OpenAPI documentation
 - Run unit and integration tests with Pytest
 - Use Docker Compose for local development and execution
 - Manage the database through pgAdmin
@@ -47,6 +51,7 @@ integration tests.
 - **Docker & Docker Compose**
 - **Psycopg**
 - **Requests**
+- **FastAPI & Uvicorn**
 - **Pytest**
 - **pgAdmin**
 
@@ -147,10 +152,10 @@ application logs a summary by stage and reason, such as missing required
 fields, `missing_station_id`, unsupported parameter, invalid timestamp, or
 invalid coordinates.
 
-To start PostgreSQL and pgAdmin for database inspection:
+To start pgAdmin and its PostgreSQL dependency for database inspection:
 
 ```bash
-docker compose up -d db pgadmin
+docker compose up -d pgadmin
 ```
 
 Open pgAdmin at:
@@ -185,6 +190,51 @@ the environment must have network access to DMI.
 
 ---
 
+## Local REST API
+
+After configuring `.env`, load DMI data using the standard application command:
+
+```bash
+docker compose up --build app
+```
+
+Wait for the ETL completion message. If Compose remains attached after
+`app_service` exits, press Ctrl+C before starting the API. The API command
+starts PostgreSQL again if needed:
+
+```bash
+docker compose up --build -d api
+```
+
+If DMI data is already stored, only the API command is needed. Open
+[Swagger UI](http://localhost:8000/docs) to see the endpoints and try requests.
+The API applies pending database migrations at startup and reads PostgreSQL;
+it does not trigger ETL runs or make requests to DMI. The Docker port is bound
+to `127.0.0.1:8000` for local access.
+
+Example request in PowerShell (use `curl` on Linux/macOS):
+
+```powershell
+curl.exe "http://localhost:8000/api/v1/measurements?parameter_id=1&limit=2"
+```
+
+This returns up to two imported temperature measurements as JSON, including
+station ID, timestamp, numeric value, and unit. Use `/api/v1/parameters` to
+discover imported parameter IDs and `/api/v1/stations` to discover stations.
+Measurements support `station_id`, `parameter_id`, timezone-aware `start` and
+`end`, and `limit`/`offset` pagination. Data endpoints use the `/api/v1` prefix;
+`/health` checks database connectivity.
+
+See the [API user guide](docs/API.md) for the complete endpoint reference,
+setup instructions, request and response examples, error codes, data semantics,
+and test commands. The guide also walks through the complete flow from DMI
+imports to validated JSON responses, with the responsibilities of each API
+module and the project's documentation and typing conventions.
+Machine-readable documentation is at
+[/openapi.json](http://localhost:8000/openapi.json).
+
+---
+
 ## Project structure
 
 ```text
@@ -195,6 +245,11 @@ environment_data_project/
 │   └── devcontainer.json
 ├── app/
 │   ├── __init__.py
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── models.py
+│   │   └── repository.py
 │   ├── constants/
 │   │   ├── __init__.py
 │   │   └── parameters.py
@@ -220,6 +275,8 @@ environment_data_project/
 │   │   └── 0005_require_measurement_station.sql
 │   ├── main.py
 │   └── pipeline.py
+├── docs/
+│   └── API.md
 ├── pgadmin/
 │   └── servers.json
 ├── tests/
@@ -227,9 +284,12 @@ environment_data_project/
 │   ├── integration/
 │   │   ├── __init__.py
 │   │   ├── test_dmi_api.py
-│   │   └── test_postgres.py
+│   │   ├── test_postgres.py
+│   │   └── test_rest_api.py
 │   └── unit/
 │       ├── __init__.py
+│       ├── test_api.py
+│       ├── test_api_repository.py
 │       ├── test_database.py
 │       ├── test_extract.py
 │       ├── test_load.py
@@ -261,6 +321,11 @@ environment_data_project/
 - The `app/load` directory contains persistence components.
 - The `app/constants` directory contains shared constants, including IDs for
   the supported measurement parameters.
+- The [app/api](app/api/) directory contains the FastAPI entry point, public response
+  models, and read-only PostgreSQL queries. The `api` Compose service runs
+  this independently of the one-shot ETL application.
+- [docs/API.md](docs/API.md) documents local API usage, filters, pagination,
+  errors, and examples.
 - The `app/migrations` directory contains versioned SQL scripts for creating
   and updating the database schema.
 - `app/pipeline.py` defines the concrete DMI extract-transform-load flow.
@@ -274,9 +339,10 @@ environment_data_project/
   - The `tests/integration` directory contains integration tests that verify
     connections to external systems. `test_postgres.py` tests the connection
     to PostgreSQL, and `test_dmi_api.py` sends a request to the configured DMI
-    API.
+    API. [test_rest_api.py](tests/integration/test_rest_api.py) verifies HTTP
+    filtering and pagination against isolated temporary PostgreSQL tables.
 - `Dockerfile` defines the Docker image for the application and tests.
-  `docker-compose.yml` configures the app, test, PostgreSQL, and pgAdmin
+  `docker-compose.yml` configures the ETL app, API, test, PostgreSQL, and pgAdmin
   services.
 - `.gitignore` specifies which files Git should ignore, such as local
   environment settings. `.dockerignore` specifies which files to exclude from
@@ -321,8 +387,11 @@ flowchart LR
         Repository["«component»<br/>Measurement repository<br/>MeasurementRepository"]
         Database["«component»<br/>Database connection<br/>app/database.py"]
         Migrations["«component»<br/>Migration runner<br/>app/migration_runner.py"]
+        API["«component»<br/>FastAPI REST API<br/>app/api/main.py"]
+        Reader["«component»<br/>DMI read repository<br/>DMIReadRepository"]
     end
 
+    Client["API client / Swagger UI"]
     DMI["«external system»<br/>DMI Observation API"]
     PostgreSQL[("«database»<br/>PostgreSQL")]
 
@@ -336,13 +405,18 @@ flowchart LR
     Database -->|connection| PostgreSQL
     Migrations -->|schema| PostgreSQL
     Repository -->|SQL operations| PostgreSQL
+    Client <-->|HTTP GET / JSON| API
+    API -.->|reads with| Reader
+    API -.->|opens read-only connections| Database
+    API -.->|applies migrations at startup| Migrations
+    Reader -->|SELECT queries| PostgreSQL
 
     classDef application fill:#eff6ff,stroke:#2563eb,color:#0f172a,stroke-width:1.5px
     classDef external fill:#f8fafc,stroke:#64748b,color:#0f172a,stroke-width:1.5px
     classDef datastore fill:#ecfdf5,stroke:#059669,color:#064e3b,stroke-width:1.5px
 
-    class Main,ETL,Source,Transformer,Repository,Database,Migrations application
-    class DMI external
+    class Main,ETL,Source,Transformer,Repository,Database,Migrations,API,Reader application
+    class DMI,Client external
     class PostgreSQL datastore
 ```
 
@@ -564,9 +638,10 @@ migrations:
 docker compose up --build app
 ```
 
-Migrations run automatically during application startup, before the ETL cycle.
-There is currently no migration-only command, so this also runs one ETL cycle
-and requires valid DMI and database configuration.
+Migrations run automatically during ETL startup, before the ETL cycle. The
+command above therefore requires valid DMI and database configuration. The
+API service also applies pending migrations at startup without running ETL
+or requiring DMI configuration.
 
 After a migration has been committed, do not edit or rename it. To change the
 schema, add a new migration file with the next version, such as

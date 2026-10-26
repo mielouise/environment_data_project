@@ -15,6 +15,21 @@ services:
       DMI_API_URL: ${DMI_API_URL}
       DMI_PARAMETER_IDS: ${DMI_PARAMETER_IDS:-}
 
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
+
   tests:
     build: .
     container_name: test_service
