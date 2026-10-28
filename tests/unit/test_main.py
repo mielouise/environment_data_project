@@ -24,6 +24,7 @@ def test_main_pipeline_success(
 ):
     monkeypatch.setenv("DMI_API_URL", "http://fake-url.com")
     monkeypatch.delenv("DMI_PARAMETER_IDS", raising=False)
+    monkeypatch.setenv("HERODOT_ENABLED", "false")
     configure_logging = MagicMock()
     monkeypatch.setattr("app.main.logging.basicConfig", configure_logging)
     mock_source = MagicMock()
@@ -52,6 +53,35 @@ def test_main_pipeline_success(
         parameter_ids=DEFAULT_DMI_PARAMETER_IDS,
     )
     assert "ETL cycle completed: 2 observations processed." in (capsys.readouterr().out)
+
+
+@patch("app.main.apply_migrations")
+@patch("app.main.DMIDataSource")
+@patch("app.main.run_dmi_pipeline", return_value=2)
+@patch("app.main.HerodotDataSource.from_environment")
+@patch("app.main.run_herodot_pipeline", return_value=45)
+def test_main_runs_herodot_when_enabled(
+    mock_run_herodot,
+    mock_herodot_source,
+    mock_run_dmi,
+    mock_dmi_source,
+    mock_apply_migrations,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setenv("DMI_API_URL", "http://fake-url.com")
+    monkeypatch.setenv("HERODOT_ENABLED", "true")
+    mock_dmi_source.side_effect = [MagicMock(), MagicMock()]
+    source = MagicMock()
+    mock_herodot_source.return_value = source
+
+    main()
+
+    mock_herodot_source.assert_called_once_with()
+    mock_run_herodot.assert_called_once_with(source)
+    output = capsys.readouterr().out
+    assert "ETL cycle completed: 2 observations processed." in output
+    assert "Herodot cycle completed: 45 measurements processed" in output
 
 
 @patch("app.main.apply_migrations")

@@ -1,8 +1,9 @@
-# DMI REST API user guide
+# Environmental data REST API user guide
 
-The API exposes DMI observations imported into PostgreSQL by the ETL pipeline.
-It uses FastAPI and returns JSON over HTTP. Clients can read measurements,
-station metadata, and parameter definitions through the endpoints below.
+The API exposes DMI and Herodot observations imported into PostgreSQL by the
+ETL pipelines. It uses FastAPI and returns JSON over HTTP. Clients can read
+measurements, station metadata, and parameter definitions through the endpoints
+below.
 
 ## Contents
 
@@ -31,7 +32,9 @@ The API reads the same five `POSTGRES_*` variables as the ETL application:
 host, port, database name, username, and password. See
 [the environment example](../.env.example) for their exact names.
 
-Import DMI observations using the standard application command:
+Import DMI observations using the standard application command. To also run
+the first-page Herodot import, set `HERODOT_ENABLED=true` and configure
+`SENSOR_API_TOKEN` in the local `.env` file:
 
 ```powershell
 docker compose up --build app
@@ -56,8 +59,9 @@ the same ETL code in a temporary container and removes that container when
 finished. The API uses `up` so Docker publishes its configured port.
 
 The API requires database configuration only. The ETL application additionally
-uses `DMI_API_URL` and the optional `DMI_PARAMETER_IDS` selection. HTTP requests
-to this API read stored observations and do not trigger requests to DMI.
+uses `DMI_API_URL`, optional `DMI_PARAMETER_IDS`, and optionally the Herodot
+environment variables. HTTP requests to this API read stored observations and
+do not trigger requests to upstream sources.
 
 | Address | Purpose |
 | --- | --- |
@@ -82,26 +86,38 @@ Data endpoints use the versioned `/api/v1` prefix. All endpoints use HTTP GET.
 | Path | Response |
 | --- | --- |
 | `/health` | `{"status":"ok"}` when PostgreSQL can execute a query |
-| `/api/v1/parameters` | Parameter IDs, names, and units with imported DMI measurements |
-| `/api/v1/stations` | Paginated station metadata, ordered by station ID |
-| `/api/v1/stations/{station_id}` | One station's latest imported metadata and coordinates |
-| `/api/v1/measurements` | Paginated DMI measurements, newest first |
-| `/api/v1/measurements/{measurement_id}` | One DMI measurement, including its parameter name and unit |
+| `/api/v1/parameters` | Parameter IDs, names, and units with imported measurements; optional `source_id` filter |
+| `/api/v1/stations` | Paginated station/node metadata, ordered by ID |
+| `/api/v1/stations/{station_id}` | One station/node's imported metadata |
+| `/api/v1/measurements` | Paginated measurements from all sources, newest first; optional `source_id` filter |
+| `/api/v1/measurements/{measurement_id}` | One measurement, including source, parameter name, and unit |
 
-A station ID is a string, such as `06180`. Preserve its leading zeros. The
-station list can include stations without measurements for the parameters or
-time interval you have imported. Coordinates use WGS84; station height is in
-metres and may be `null`.
+A station ID is a string, such as `06180`, or a Herodot sensor node UUID.
+Preserve leading zeros for DMI IDs. Herodot station names and coordinates are
+unknown in the observations endpoint and are returned as `null`; do not infer
+locations. DMI coordinates use WGS84; station height is in metres and may be
+`null`.
 
-The parameter list includes only types with stored DMI observations. The API
-uses numeric database IDs: `1` represents temperature and `2` represents
-humidity. DMI's text identifier `temp_dry` is used during extraction and is
-not accepted as the API's `parameter_id`. The complete internal ID catalogue
-is defined in [the parameter enum](../app/constants/parameters.py).
+The parameter list includes only types with stored observations, optionally
+filtered by source. The API uses numeric database IDs: `1` represents
+temperature, `2` humidity, `4` CO₂, and `20` pressure. DMI's text identifier
+`temp_dry` is used during extraction and is not accepted as the API's
+`parameter_id`. The complete internal ID catalogue is defined in
+[the parameter enum](../app/constants/parameters.py).
 
-The original database catalogue also contains CO2 and PM2.5. Those types only
-appear in this API's parameter list if DMI measurements exist for them; the
-current ETL application does not import them.
+Herodot imports one response page only (100 observations per ETL run) and does
+not yet follow subsequent pages. The API has returned blank `sensor` values for
+DS18B20 records; these are mapped as temperature. Herodot pressure values are
+currently treated as Pa and converted to hPa based on observed values; confirm
+this assumption with the provider before relying on pressure comparisons.
+Herodot `observationId` and `readingId` are retained in the database and
+returned as `source_observation_id` and `source_reading_id`. `readingId` is
+used to identify a Herodot reading across repeat imports, so distinct readings
+at the same node, parameter, and timestamp remain separate. Records without a
+`readingId` are inserted without timestamp-based upsert rather than risking
+the loss of distinct readings; such records can appear more than once after
+repeated imports. Existing Herodot rows imported before this migration have
+null source IDs because those values were not stored at the time.
 
 ## Filter and paginate measurements
 
@@ -110,6 +126,7 @@ Every supplied filter must match for an observation to be included.
 
 | Parameter | Type | Meaning |
 | --- | --- | --- |
+| `source_id` | String, 1–50 characters | Include only this source, for example `DMI` or `HERODOT` |
 | `station_id` | String, 1–50 characters | Include only this station's measurements |
 | `parameter_id` | Integer ≥ 1 | Include only this measurement type; discover IDs through `/api/v1/parameters` |
 | `start` | ISO 8601 timestamp with timezone | Earliest observation time, inclusive |
@@ -149,6 +166,12 @@ Then fetch the two newest stored temperature observations:
 curl.exe "http://localhost:8000/api/v1/measurements?parameter_id=1&limit=2"
 ```
 
+Filter by source when comparing imported datasets:
+
+```powershell
+curl.exe "http://localhost:8000/api/v1/measurements?source_id=HERODOT&parameter_id=1&limit=2"
+```
+
 On Linux or macOS, use `curl` instead of `curl.exe`. An illustrative response
 from a database containing these observations is:
 
@@ -158,6 +181,8 @@ from a database containing these observations is:
     {
       "measurement_id": 42,
       "source_id": "DMI",
+      "source_observation_id": null,
+      "source_reading_id": null,
       "station_id": "06180",
       "parameter_id": 1,
       "parameter_name": "Temperature",
@@ -168,6 +193,8 @@ from a database containing these observations is:
     {
       "measurement_id": 41,
       "source_id": "DMI",
+      "source_observation_id": null,
+      "source_reading_id": null,
       "station_id": "06030",
       "parameter_id": 1,
       "parameter_name": "Temperature",
@@ -291,9 +318,10 @@ validation finishes, so an invalid request may still open a connection.
 ### 4. Execute a bounded, parameterized query
 
 [The API read repository](../app/api/repository.py) owns the SELECT statements.
-Its measurement queries restrict results to `source_id = 'DMI'` and join the
-parameter table to include names and units. Filter clauses are fixed SQL;
-client values are supplied separately as bound parameters.
+Its measurement queries can filter by source and join the parameter table to
+include names and units. Without `source_id`, results include all imported
+sources. Filter clauses are fixed SQL; client values are supplied separately
+as bound parameters.
 
 List routes request `limit + 1` rows. The extra row indicates whether another
 page exists, avoiding a separate count of all matching observations.
@@ -315,7 +343,8 @@ For `GET /api/v1/measurements?parameter_id=1&limit=2`:
 
 1. FastAPI parses `parameter_id` and `limit` as integers and checks their bounds.
 2. The connection dependency provides a read-only repository.
-3. The route requests up to three DMI temperature observations from the repository.
+3. The route requests up to three matching temperature measurements from the
+   repository, regardless of source unless `source_id` is supplied.
 4. PostgreSQL orders matches by descending observation time and measurement ID.
 5. The repository converts the rows into `Measurement` models.
 6. The route returns at most two items and sets `has_more` from the third row.
@@ -331,33 +360,36 @@ The API code includes module, class, and function docstrings in English.
 Function signatures specify argument and return types, including model types,
 optional results, generic pages, and generator-based dependencies.
 
-Ruff checks PEP 8 conventions, import order, and modern Python syntax. The API
-and its tests use 79-character code lines and wrapped docstrings.
-The existing project configuration retains its 88-character maximum for
-older modules. Type annotations also drive FastAPI validation; they do not
-replace linting or automated tests.
+Ruff checks PEP 8 conventions, import order, Google-style docstrings, modern
+Python syntax, and formatting. The project uses an 88-character Python line
+limit. Type annotations also drive FastAPI validation; they do not replace
+linting or automated tests.
 
-Run the project lint checks and the stricter API checks from the project root:
+Run the project lint and formatting checks from the project root:
 
 ```powershell
 python -m ruff check app tests
-python -m ruff check app/api --select E,F,I,UP,D,ANN --ignore ANN401 --line-length 79
-python -m ruff format --check --line-length 79 app/api tests/unit/test_api.py tests/unit/test_api_repository.py tests/integration/test_rest_api.py
+python -m ruff format --check app tests
 ```
 
 These local commands require the development dependencies from
-[requirements-dev.txt](../requirements-dev.txt). Alternatively, run the same
-commands with `docker compose run --build --rm tests` before `python`.
-
-Run the unit tests and API integration tests with coverage:
+[requirements-dev.txt](../requirements-dev.txt). Alternatively, run them in
+Docker:
 
 ```powershell
-docker compose run --build --rm tests pytest tests/unit tests/integration/test_rest_api.py --cov=app --cov-report=term-missing --cov-fail-under=95
+docker compose run --build --rm --no-deps tests ruff check app tests
+docker compose run --build --rm --no-deps tests ruff format --check app tests
+```
+
+Run the unit tests and enforce the assignment's 95% minimum coverage:
+
+```powershell
+docker compose run --build --rm tests pytest tests/unit --cov=app --cov-report=term-missing --cov-fail-under=95
 ```
 
 The API tests cover request validation, documentation, numeric serialization,
 pagination, missing resources, and database failures. Repository unit tests
-check SQL parameter binding, DMI source filtering, and typed results. The API
+check SQL parameter binding, source filtering, and typed results. The API
 integration tests run real SQL against temporary tables on a dedicated
 PostgreSQL connection. They leave stored DMI observations untouched and do
 not require network access to DMI.
@@ -370,7 +402,7 @@ docker compose run --build --rm tests
 
 ## Local acceptance check
 
-After completing the local setup and importing DMI data, use Swagger UI at
+After completing the local setup and importing data, use Swagger UI at
 <http://localhost:8000/docs> to perform these checks. Select station IDs,
 parameter IDs, and timestamps from returned measurements when testing filters.
 

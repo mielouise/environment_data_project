@@ -1,27 +1,27 @@
 name: CI
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   validate:
-
     name: CI Quality
-
     runs-on: ubuntu-latest
-
     timeout-minutes: 15
 
     env:
       COMPOSE_PROJECT_NAME: ci
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -37,7 +37,15 @@ jobs:
           docker compose build
 
       #
-      # 2. Start PostgreSQL
+      # 2. Check lint rules, docstrings, and formatting
+      #
+      - name: Check Python style
+        run: |
+          docker compose run --rm --no-deps tests ruff check app tests
+          docker compose run --rm --no-deps tests ruff format --check app tests
+
+      #
+      # 3. Start PostgreSQL
       #
       - name: Start PostgreSQL
         run: |
@@ -57,7 +65,7 @@ jobs:
           done
 
       #
-      # 3. Run migrations
+      # 4. Run migrations
       #
       - name: Run database migrations
         run: |
@@ -65,7 +73,7 @@ jobs:
           python -m app.migration_runner
 
       #
-      # 4. Run unit tests (minimum 95 % coverage)
+      # 5. Run unit tests (minimum 95 % coverage)
       #
       - name: Run unit tests
         run: |
@@ -76,7 +84,7 @@ jobs:
           --cov-fail-under=95
 
       #
-      # 5. Run integration tests
+      # 6. Run integration tests
       #
       - name: Run integration tests
         run: |

@@ -19,24 +19,26 @@ class TransformResult[RecordT]:
 
 @dataclass(frozen=True)
 class MeasurementDTO:
-    """A normalized environmental measurement."""
+    """A normalized environmental measurement and optional source identities."""
 
     source_id: str
     station_id: str
     parameter_id: int
     timestamp: datetime
     value: float
+    source_observation_id: str | None = None
+    source_reading_id: str | None = None
 
 
 @dataclass(frozen=True)
 class StationDTO:
-    """A DMI station and its latest known location."""
+    """A station or sensor node with metadata when it is available."""
 
     station_id: str
-    name: str
-    station_type: str
-    country_code: str
-    latitude: float
-    longitude: float
+    name: str | None
+    station_type: str | None
+    country_code: str | None
+    latitude: float | None
+    longitude: float | None
     station_height: float | None
-    valid_from: datetime
+    valid_from: datetime | None

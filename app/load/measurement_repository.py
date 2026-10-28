@@ -76,7 +76,13 @@ class MeasurementRepository:
                     longitude = EXCLUDED.longitude,
                     station_height = EXCLUDED.station_height,
                     valid_from = EXCLUDED.valid_from
-                WHERE EXCLUDED.valid_from >= dim_stations.valid_from
+                WHERE COALESCE(
+                    EXCLUDED.valid_from,
+                    '-infinity'::timestamptz
+                ) >= COALESCE(
+                    dim_stations.valid_from,
+                    '-infinity'::timestamptz
+                )
                 """,
                 rows,
             )
@@ -85,27 +91,96 @@ class MeasurementRepository:
         self,
         records: Sequence[MeasurementDTO],
     ) -> None:
-        """Idempotently insert or update measurements."""
+        """Persist source-identified readings and upsert legacy measurements.
+
+        Herodot readings with a source reading ID are idempotent by that ID,
+        so distinct readings sharing a timestamp are retained. Herodot rows
+        without an ID are inserted without conflict resolution rather than
+        risking the loss of distinct readings.
+        """
         if not records:
             return
-        rows = [
+        identified_rows = [
             (
                 item.source_id,
                 item.station_id,
                 item.parameter_id,
                 item.timestamp,
                 item.value,
+                item.source_observation_id,
+                item.source_reading_id,
             )
             for item in records
+            if item.source_reading_id is not None
+        ]
+        unidentified_herodot_rows = [
+            (
+                item.source_id,
+                item.station_id,
+                item.parameter_id,
+                item.timestamp,
+                item.value,
+                item.source_observation_id,
+                item.source_reading_id,
+            )
+            for item in records
+            if item.source_id == "HERODOT" and item.source_reading_id is None
+        ]
+        legacy_rows = [
+            (
+                item.source_id,
+                item.station_id,
+                item.parameter_id,
+                item.timestamp,
+                item.value,
+                item.source_observation_id,
+                item.source_reading_id,
+            )
+            for item in records
+            if item.source_id != "HERODOT" and item.source_reading_id is None
         ]
         with self._connection.cursor() as cursor:
-            cursor.executemany(
-                """
-                INSERT INTO fact_measurements
-                    (source_id, station_id, parameter_id, timestamp, value)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT ON CONSTRAINT unique_measurement_by_station
-                DO UPDATE SET value = EXCLUDED.value
-                """,
-                rows,
-            )
+            if identified_rows:
+                cursor.executemany(
+                    """
+                    INSERT INTO fact_measurements (
+                        source_id, station_id, parameter_id, timestamp, value,
+                        source_observation_id, source_reading_id
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (source_id, source_reading_id)
+                        WHERE source_reading_id IS NOT NULL
+                    DO UPDATE SET
+                        station_id = EXCLUDED.station_id,
+                        parameter_id = EXCLUDED.parameter_id,
+                        timestamp = EXCLUDED.timestamp,
+                        value = EXCLUDED.value,
+                        source_observation_id = EXCLUDED.source_observation_id
+                    """,
+                    identified_rows,
+                )
+            if unidentified_herodot_rows:
+                cursor.executemany(
+                    """
+                    INSERT INTO fact_measurements (
+                        source_id, station_id, parameter_id, timestamp, value,
+                        source_observation_id, source_reading_id
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    unidentified_herodot_rows,
+                )
+            if legacy_rows:
+                cursor.executemany(
+                    """
+                    INSERT INTO fact_measurements (
+                        source_id, station_id, parameter_id, timestamp, value,
+                        source_observation_id, source_reading_id
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (source_id, station_id, parameter_id, timestamp)
+                        WHERE source_reading_id IS NULL AND source_id <> 'HERODOT'
+                    DO UPDATE SET value = EXCLUDED.value
+                    """,
+                    legacy_rows,
+                )

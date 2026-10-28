@@ -37,7 +37,7 @@ def test_save_source():
 
 
 def test_save_measurements_success():
-    """Verify measurements are converted to bulk insert rows."""
+    """Verify source-less DMI measurements use the legacy conflict key."""
 
     mock_conn = MagicMock()
 
@@ -62,6 +62,7 @@ def test_save_measurements_success():
     assert "INSERT INTO fact_measurements" in query
     assert "ON CONFLICT" in query
     assert "DO UPDATE SET" in query
+    assert "WHERE source_reading_id IS NULL AND source_id <> 'HERODOT'" in query
     assert rows == [
         (
             "DMI",
@@ -69,10 +70,59 @@ def test_save_measurements_success():
             1,
             datetime(2026, 10, 5, 12, 0, tzinfo=UTC),
             15.0,
+            None,
+            None,
         )
     ]
 
     mock_conn.commit.assert_not_called()
+
+
+def test_save_measurements_preserves_distinct_source_readings():
+    """Use source IDs to retain readings that share station and timestamp."""
+    mock_conn = MagicMock()
+    mock_cursor = mock_conn.cursor.return_value.__enter__.return_value
+    repository = MeasurementRepository(mock_conn)
+    timestamp = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+    records = [
+        MeasurementDTO(
+            source_id="HERODOT",
+            station_id="node-123",
+            parameter_id=1,
+            timestamp=timestamp,
+            value=value,
+            source_observation_id=f"observation-{reading_id}",
+            source_reading_id=reading_id,
+        )
+        for reading_id, value in (("reading-1", 15.0), ("reading-2", 16.0))
+    ]
+
+    repository.save_measurements(records)
+
+    query, rows = mock_cursor.executemany.call_args.args
+    assert "ON CONFLICT (source_id, source_reading_id)" in query
+    assert len(rows) == 2
+    assert [row[-1] for row in rows] == ["reading-1", "reading-2"]
+
+
+def test_save_measurements_inserts_unidentified_herodot_rows_without_upsert():
+    """Avoid collapsing Herodot rows when the source provides no reading ID."""
+    mock_conn = MagicMock()
+    mock_cursor = mock_conn.cursor.return_value.__enter__.return_value
+    repository = MeasurementRepository(mock_conn)
+    measurement = MeasurementDTO(
+        source_id="HERODOT",
+        station_id="node-123",
+        parameter_id=1,
+        timestamp=datetime(2026, 10, 5, 12, 0, tzinfo=UTC),
+        value=15.0,
+    )
+
+    repository.save_measurements([measurement])
+
+    query, rows = mock_cursor.executemany.call_args.args
+    assert "ON CONFLICT" not in query
+    assert rows[0][-2:] == (None, None)
 
 
 def test_save_measurements_empty():
@@ -109,7 +159,7 @@ def test_save_stations_upserts_latest_station_location():
     assert "INSERT INTO dim_stations" in query
     assert "station_name" in query
     assert "ON CONFLICT (station_id)" in query
-    assert "EXCLUDED.valid_from >= dim_stations.valid_from" in query
+    assert "COALESCE" in query
     assert rows == [
         (
             "05329",
@@ -123,6 +173,28 @@ def test_save_stations_upserts_latest_station_location():
         )
     ]
     mock_conn.commit.assert_not_called()
+
+
+def test_save_stations_supports_unknown_herodot_metadata():
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    repository = MeasurementRepository(mock_conn)
+    node = StationDTO(
+        station_id="node-123",
+        name=None,
+        station_type="sensor_node",
+        country_code=None,
+        latitude=None,
+        longitude=None,
+        station_height=None,
+        valid_from=None,
+    )
+
+    repository.save_stations([node])
+
+    _, rows = mock_cursor.executemany.call_args.args
+    assert rows == [("node-123", None, "sensor_node", None, None, None, None, None)]
 
 
 def test_save_stations_empty_skips_database_work():

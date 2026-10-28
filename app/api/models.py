@@ -29,26 +29,22 @@ class Parameter(BaseModel):
 
 
 class Station(BaseModel):
-    """Describe a station and its latest imported WGS84 location."""
+    """Describe a station or sensor node with metadata when known."""
 
-    station_id: str = Field(
-        description="DMI station ID; leading zeros are preserved."
-    )
-    station_name: str
-    station_type: str
-    country_code: str
-    latitude: float
-    longitude: float
-    station_height: float | None = Field(
-        description="Height in metres, if known."
-    )
-    valid_from: AwareTimestamp = Field(
-        description="Time from which this station metadata is valid."
+    station_id: str = Field(description="Station ID or sensor node ID.")
+    station_name: str | None
+    station_type: str | None
+    country_code: str | None
+    latitude: float | None = Field(description="WGS84 latitude, if known.")
+    longitude: float | None = Field(description="WGS84 longitude, if known.")
+    station_height: float | None = Field(description="Height in metres, if known.")
+    valid_from: AwareTimestamp | None = Field(
+        description="Time from which the metadata is valid, if known."
     )
 
 
 class Measurement(BaseModel):
-    """Represent one stored DMI observation with parameter metadata.
+    """Represent one stored environmental observation with parameter metadata.
 
     PostgreSQL numeric values are converted to JSON numbers. Timestamps
     identify the observation time and always include a timezone.
@@ -56,6 +52,8 @@ class Measurement(BaseModel):
 
     measurement_id: int
     source_id: str
+    source_observation_id: str | None
+    source_reading_id: str | None
     station_id: str
     parameter_id: int
     parameter_name: str
@@ -78,6 +76,4 @@ class Page[ItemT](BaseModel):
     items: list[ItemT]
     limit: int
     offset: int
-    has_more: bool = Field(
-        description="Request offset + limit to get the next page."
-    )
+    has_more: bool = Field(description="Request offset + limit to get the next page.")

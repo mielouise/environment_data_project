@@ -4,16 +4,18 @@ import logging
 import os
 import sys
 
-from app.extract import DMIDataSource
+from app.extract import DMIDataSource, HerodotDataSource
 from app.extract.dmi import build_dmi_collection_url
 from app.migration_runner import apply_migrations
-from app.pipeline import run_dmi_pipeline
+from app.pipeline import run_dmi_pipeline, run_herodot_pipeline
 from app.transform.dmi import SUPPORTED_DMI_PARAMETER_IDS
 
 DEFAULT_DMI_PARAMETER_IDS = (
     "temp_dry",
     "humidity",
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _configured_parameter_ids() -> tuple[str, ...]:
@@ -76,6 +78,26 @@ def main() -> None:
             f"ETL cycle completed: {measurement_count} observations processed.",
             flush=True,
         )
+        herodot_enabled = (
+            os.environ.get(
+                "HERODOT_ENABLED",
+                "false",
+            )
+            .strip()
+            .lower()
+        )
+        if herodot_enabled not in {"true", "false"}:
+            raise ValueError("HERODOT_ENABLED must be either true or false.")
+        if herodot_enabled == "true":
+            herodot_source = HerodotDataSource.from_environment()
+            herodot_count = run_herodot_pipeline(herodot_source)
+            print(
+                f"Herodot cycle completed: {herodot_count} measurements processed "
+                "from the first page.",
+                flush=True,
+            )
+        else:
+            logger.info("Skipping Herodot ETL; HERODOT_ENABLED is not true.")
         print("=== ETL Pipeline Completed ===")
     except Exception as err:  # noqa: BLE001 - CLI boundary reports run failures.
         print(

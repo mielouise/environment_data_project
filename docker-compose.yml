@@ -14,6 +14,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DMI_API_URL: ${DMI_API_URL}
       DMI_PARAMETER_IDS: ${DMI_PARAMETER_IDS:-}
+      HERODOT_ENABLED: ${HERODOT_ENABLED:-false}
+      SENSOR_API_URL: ${SENSOR_API_URL:-https://herodot.spac.dk/api/v1/observations}
+      SENSOR_API_TOKEN: ${SENSOR_API_TOKEN:-}
 
   api:
     build: .
