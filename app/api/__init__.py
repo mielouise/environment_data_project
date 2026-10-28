@@ -1,1 +1,1 @@
-"""REST API for DMI observations stored by the ETL pipeline."""
+"""REST API for environmental observations stored by ETL pipelines."""

@@ -9,7 +9,8 @@ from psycopg.rows import dict_row
 from app.api.models import Measurement, Parameter, Station
 
 MEASUREMENT_COLUMNS = """
-    m.measurement_id, m.source_id, m.station_id, m.parameter_id,
+    m.measurement_id, m.source_id, m.source_observation_id,
+    m.source_reading_id, m.station_id, m.parameter_id,
     p.parameter_name, p.unit, m.timestamp, m.value
 """
 STATION_COLUMNS = """
@@ -18,8 +19,8 @@ STATION_COLUMNS = """
 """
 
 
-class DMIReadRepository:
-    """Read imported DMI data using a caller-managed connection."""
+class EnvironmentalReadRepository:
+    """Read imported environmental data using a caller-managed connection."""
 
     def __init__(self, connection: Connection[Any]) -> None:
         """Use a connection whose lifetime is managed by the caller.
@@ -38,25 +39,34 @@ class DMIReadRepository:
         with self._connection.cursor() as cursor:
             cursor.execute("SELECT 1")
 
-    def list_parameters(self) -> list[Parameter]:
-        """Return parameter metadata for stored DMI observations.
+    def list_parameters(self, source_id: str | None = None) -> list[Parameter]:
+        """Return parameter metadata for stored observations.
+
+        Args:
+            source_id: Optional source filter.
 
         Returns:
             Parameters ordered by database ID, excluding types without
-            imported DMI measurements.
+            imported measurements in the requested source.
         """
+        source_filter = ""
+        values: tuple[str, ...] = ()
+        if source_id is not None:
+            source_filter = "AND m.source_id = %s"
+            values = (source_id,)
         with self._connection.cursor(row_factory=dict_row) as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT p.parameter_id, p.parameter_name, p.unit
                 FROM dim_parameters p
                 WHERE EXISTS (
                     SELECT 1 FROM fact_measurements m
                     WHERE m.parameter_id = p.parameter_id
-                        AND m.source_id = 'DMI'
+                        {source_filter}
                 )
                 ORDER BY p.parameter_id
-                """
+                """,
+                values,
             )
             return [Parameter.model_validate(row) for row in cursor.fetchall()]
 
@@ -84,7 +94,7 @@ class DMIReadRepository:
         """Return station metadata, or None when the station is unknown.
 
         Args:
-            station_id: DMI station ID, including leading zeros.
+            station_id: Station or sensor node ID.
         """
         with self._connection.cursor(row_factory=dict_row) as cursor:
             cursor.execute(
@@ -100,6 +110,7 @@ class DMIReadRepository:
     def list_measurements(
         self,
         *,
+        source_id: str | None,
         station_id: str | None,
         parameter_id: int | None,
         start: datetime | None,
@@ -107,9 +118,10 @@ class DMIReadRepository:
         limit: int,
         offset: int,
     ) -> list[Measurement]:
-        """Return DMI observations matching every supplied filter.
+        """Return observations matching every supplied filter.
 
         Args:
+            source_id: Source ID, or None for all sources.
             station_id: Station ID, or None for all stations.
             parameter_id: Database parameter ID, or None for all types.
             start: Inclusive earliest time, or None for no bound.
@@ -121,10 +133,11 @@ class DMIReadRepository:
             Measurements ordered by descending timestamp and ID.
             Every filter value is bound as a separate SQL parameter.
         """
-        conditions = ["m.source_id = 'DMI'"]
+        conditions = ["TRUE"]
         values: list[str | int | datetime] = []
         # Keep SQL clauses fixed and bind client values separately.
         for clause, value in (
+            ("m.source_id = %s", source_id),
             ("m.station_id = %s", station_id),
             ("m.parameter_id = %s", parameter_id),
             ("m.timestamp >= %s", start),
@@ -146,12 +159,10 @@ class DMIReadRepository:
                 """,
                 values,
             )
-            return [
-                Measurement.model_validate(row) for row in cursor.fetchall()
-            ]
+            return [Measurement.model_validate(row) for row in cursor.fetchall()]
 
     def get_measurement(self, measurement_id: int) -> Measurement | None:
-        """Return a DMI observation, or None for missing or non-DMI IDs.
+        """Return an observation, or None when its ID is unknown.
 
         Args:
             measurement_id: Database primary key of the observation.
@@ -162,7 +173,7 @@ class DMIReadRepository:
                 SELECT {MEASUREMENT_COLUMNS}
                 FROM fact_measurements m
                 JOIN dim_parameters p ON p.parameter_id = m.parameter_id
-                WHERE m.source_id = 'DMI' AND m.measurement_id = %s
+                WHERE m.measurement_id = %s
                 """,
                 (measurement_id,),
             )

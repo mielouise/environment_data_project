@@ -26,6 +26,8 @@ STATION = {
 MEASUREMENT = {
     "measurement_id": 42,
     "source_id": "DMI",
+    "source_observation_id": None,
+    "source_reading_id": None,
     "station_id": "06180",
     "parameter_id": 1,
     "parameter_name": "Temperature",
@@ -56,14 +58,13 @@ def test_discovery_and_documentation(api: APIFixture) -> None:
     repository.list_parameters.return_value = [
         {"parameter_id": 1, "parameter_name": "Temperature", "unit": "°C"}
     ]
-    assert (
-        client.get("/", follow_redirects=False).headers["location"] == "/docs"
-    )
+    assert client.get("/", follow_redirects=False).headers["location"] == "/docs"
     assert client.get("/docs").status_code == 200
     assert client.get("/redoc").status_code == 200
     schema = client.get("/openapi.json").json()
     operation = schema["paths"]["/api/v1/measurements"]["get"]
     assert {p["name"] for p in operation["parameters"]} == {
+        "source_id",
         "station_id",
         "parameter_id",
         "start",
@@ -75,6 +76,11 @@ def test_discovery_and_documentation(api: APIFixture) -> None:
     response = client.get("/api/v1/parameters")
     assert response.status_code == 200
     assert response.json()[0]["unit"] == "°C"
+    repository.list_parameters.assert_called_once_with(source_id=None)
+    parameter_operation = schema["paths"]["/api/v1/parameters"]["get"]
+    assert {parameter["name"] for parameter in parameter_operation["parameters"]} == {
+        "source_id"
+    }
 
 
 def test_health(api: APIFixture) -> None:
@@ -122,6 +128,7 @@ def test_measurement_filters_and_serialization(api: APIFixture) -> None:
     assert body["items"][0]["timestamp"] == "2026-10-26T10:00:00Z"
     assert body["has_more"] is False
     repository.list_measurements.assert_called_once_with(
+        source_id=None,
         station_id="06180",
         parameter_id=1,
         start=datetime(2026, 10, 26, 10, tzinfo=UTC),
@@ -132,6 +139,17 @@ def test_measurement_filters_and_serialization(api: APIFixture) -> None:
     repository.get_measurement.return_value = MEASUREMENT
     assert client.get("/api/v1/measurements/42").json()["measurement_id"] == 42
     repository.get_measurement.assert_called_once_with(42)
+
+
+def test_measurement_source_filter(api: APIFixture) -> None:
+    client, repository = api
+    repository.list_measurements.return_value = []
+
+    response = client.get("/api/v1/measurements?source_id=HERODOT")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+    assert repository.list_measurements.call_args.kwargs["source_id"] == "HERODOT"
 
 
 @pytest.mark.parametrize("resource", ["measurements", "stations"])

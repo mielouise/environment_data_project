@@ -21,9 +21,12 @@ from app.database import get_db_connection
 from app.extract import SensorDataSource
 from app.load import MeasurementRepository
 from app.transform import (
+    MeasurementDTO,
+    StationDTO,
     TransformResult,
     transform_dmi_observations_with_report,
     transform_dmi_stations_with_report,
+    transform_herodot_observations_with_report,
 )
 
 DENMARK_BBOX = "7,54,16,58"
@@ -283,4 +286,69 @@ def run_dmi_pipeline(
         len(measurements),
     )
 
+    return len(measurements)
+
+
+def run_herodot_pipeline(
+    observation_source: SensorDataSource,
+    page_size: int = 100,
+) -> int:
+    """Import one Herodot observations page into PostgreSQL.
+
+    The API's offset pagination has not been confirmed to return distinct
+    records, so this pipeline intentionally requests and loads one page only.
+    """
+    if page_size <= 0:
+        raise ValueError("page_size must be greater than zero.")
+
+    logger.info("Fetching the first %s Herodot observations.", page_size)
+    raw_data = observation_source.fetch(params={"limit": page_size})
+    raw_observations = raw_data.get("observations")
+    if not isinstance(raw_observations, list):
+        raise RuntimeError("Herodot response must contain an observations list.")
+
+    logger.info(
+        "Fetched %s Herodot observations from the first page.",
+        len(raw_observations),
+    )
+    result = transform_herodot_observations_with_report(
+        raw_data,
+        source_id=observation_source.source_id,
+    )
+    _log_transform_result("Herodot observations", result)
+
+    stations_by_id = {
+        measurement.station_id: StationDTO(
+            station_id=measurement.station_id,
+            name=None,
+            station_type="sensor_node",
+            country_code=None,
+            latitude=None,
+            longitude=None,
+            station_height=None,
+            valid_from=None,
+        )
+        for measurement in result.records
+    }
+    stations = sorted(stations_by_id.values(), key=lambda station: station.station_id)
+    measurements: list[MeasurementDTO] = result.records
+
+    connection = get_db_connection()
+    try:
+        with connection.transaction():
+            repository = MeasurementRepository(connection)
+            repository.save_source(
+                source_id=observation_source.source_id,
+                source_name=observation_source.source_name,
+                source_type="API_HERODOT",
+            )
+            repository.save_stations(stations)
+            repository.save_measurements(measurements)
+    finally:
+        connection.close()
+
+    logger.info(
+        "Successfully persisted %s Herodot measurements.",
+        len(measurements),
+    )
     return len(measurements)

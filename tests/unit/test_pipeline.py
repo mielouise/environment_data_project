@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.pipeline import run_dmi_pipeline
+from app.pipeline import run_dmi_pipeline, run_herodot_pipeline
 from app.transform import MeasurementDTO, StationDTO
 
 
@@ -359,4 +359,80 @@ def test_pipeline_rolls_back_and_closes_connection_when_loading_fails(
     assert (
         connection.transaction.return_value.__exit__.call_args.args[0] is RuntimeError
     )
+    connection.close.assert_called_once_with()
+
+
+def test_herodot_pipeline_loads_first_page_and_node_stations(monkeypatch):
+    observation_source = MagicMock()
+    observation_source.source_id = "HERODOT"
+    observation_source.source_name = "Herodot Sensor API"
+    observation_source.fetch.return_value = {
+        "observations": [
+            {
+                "nodeId": "node-123",
+                "sensor": "pressure",
+                "timestamp": "2026-10-28T13:00:00Z",
+                "value": 101325,
+            },
+            {
+                "nodeId": "node-123",
+                "sensor": "",
+                "instrumentModel": "DS18B20",
+                "timestamp": "2026-10-28T13:00:00Z",
+                "value": 20,
+            },
+        ]
+    }
+    connection = MagicMock()
+    repository = MagicMock()
+    monkeypatch.setattr(
+        "app.pipeline.get_db_connection",
+        MagicMock(return_value=connection),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.MeasurementRepository",
+        MagicMock(return_value=repository),
+    )
+
+    assert run_herodot_pipeline(observation_source) == 2
+
+    observation_source.fetch.assert_called_once_with(params={"limit": 100})
+    repository.save_source.assert_called_once_with(
+        source_id="HERODOT",
+        source_name="Herodot Sensor API",
+        source_type="API_HERODOT",
+    )
+    repository.save_stations.assert_called_once_with(
+        [
+            StationDTO(
+                station_id="node-123",
+                name=None,
+                station_type="sensor_node",
+                country_code=None,
+                latitude=None,
+                longitude=None,
+                station_height=None,
+                valid_from=None,
+            )
+        ]
+    )
+    repository.save_measurements.assert_called_once_with(
+        [
+            MeasurementDTO(
+                source_id="HERODOT",
+                station_id="node-123",
+                parameter_id=20,
+                timestamp=datetime(2026, 10, 28, 13, tzinfo=UTC),
+                value=1013.25,
+            ),
+            MeasurementDTO(
+                source_id="HERODOT",
+                station_id="node-123",
+                parameter_id=1,
+                timestamp=datetime(2026, 10, 28, 13, tzinfo=UTC),
+                value=20,
+            ),
+        ]
+    )
+    connection.transaction.assert_called_once_with()
     connection.close.assert_called_once_with()

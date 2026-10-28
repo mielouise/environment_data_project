@@ -1,9 +1,10 @@
 # Environment Data Project
 
 A Python ETL application that retrieves environmental observations from the
-Danish Meteorological Institute (DMI), transforms supported measurements, and
-stores them in PostgreSQL. A local FastAPI REST API exposes the imported
-measurements, stations, and parameter metadata as JSON.
+Danish Meteorological Institute (DMI) and, when enabled, the Herodot sensor
+API. It transforms supported measurements and stores them in PostgreSQL. A
+local FastAPI REST API exposes the imported measurements, stations, and
+parameter metadata as JSON.
 
 The project is organized into extraction, transformation, and persistence
 components, with versioned database migrations and automated unit and
@@ -27,26 +28,46 @@ integration tests.
 
 ## Features
 
-- Retrieve environmental observations from the DMI API
+- Retrieve environmental observations from the DMI API and optionally from
+  the Herodot sensor API
 - Filter observations by parameter and a rolling time window at the API
 - Fetch parameter-filtered observations concurrently, with a five-request
   limit to avoid unbounded load on DMI
 - Transform the documented DMI meteorological observation parameters,
   including categorical weather and snow-cover codes
 - Store source metadata, station locations, and measurements in PostgreSQL
+- Compare observations across sources, stations, and parameters through the
+  REST API
+- Import one Herodot response page (100 observations) when explicitly enabled
 - Apply versioned SQL migrations automatically at startup
 - Run one ETL cycle per application invocation
-- Query imported DMI data through a versioned REST API with filters and pagination
+- Query imported data through a versioned REST API with filters and pagination
 - Explore and call endpoints through generated Swagger/OpenAPI documentation
 - Run unit and integration tests with Pytest
 - Use Docker Compose for local development and execution
 - Manage the database through pgAdmin
 
+## Assignment alignment
+
+- **API-based collection and ETL:** DMI data is extracted, validated and
+  transformed, then loaded into PostgreSQL. Herodot is an optional additional
+  source and currently imports its first response page only.
+- **Database server and warehouse model:** PostgreSQL stores sources,
+  parameters, stations/sensor nodes, and measurements in related tables.
+- **Cross-station and cross-source comparison:** The REST API exposes
+  measurements with source, station, parameter, and time filters.
+- **Automated testing:** The CI workflow enforces at least 95% unit-test
+  coverage and runs integration tests.
+- **Documentation and UML:** This README contains build, run, test, software
+  architecture, and Mermaid component, class, workflow, and ER diagrams.
+- **GitHub delivery:** A GitHub remote is configured for this repository.
+  Verify that the supervisors have permission to access it in GitHub settings.
+
 ---
 
 ## Technology stack
 
-- **Python 3**
+- **Python 3.12**
 - **PostgreSQL**
 - **Docker & Docker Compose**
 - **Psycopg**
@@ -86,10 +107,17 @@ and pgAdmin email are configurable; replace the example credentials before
 using the project outside local development. `.env` is ignored by Git; do not
 commit real credentials.
 
-The ETL application requires `DMI_API_URL` and the five `POSTGRES_*`
+The current ETL application requires `DMI_API_URL` and the five `POSTGRES_*`
 variables. The pgAdmin variables are needed only when starting the `pgadmin`
 service. `DMI_PARAMETER_IDS` is optional and defaults to air temperature and
-humidity observations.
+humidity observations. `SENSOR_API_URL` and `SENSOR_API_TOKEN` configure the
+Herodot extractor. Set `HERODOT_ENABLED=true` to run a one-page Herodot
+import after DMI. Herodot observations are stored with node IDs as station IDs;
+unknown station names and locations remain null rather than being fabricated.
+The current import requests one page of 100 observations; it does not follow
+pagination, and the API's ordering has not been confirmed. Herodot pressure
+values are provisionally treated as Pa and converted to hPa. Confirm this unit
+with the provider before using pressure comparisons as evidence.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -102,6 +130,9 @@ humidity observations.
 | `PGADMIN_USER_EMAIL` | For pgAdmin | Sign-in email; the example value can be changed. |
 | `PGADMIN_PASSWORD` | For pgAdmin | Sign-in password; set a suitable value for your environment. |
 | `DMI_PARAMETER_IDS` | No | Comma-separated DMI parameter IDs. Leave blank to use the default: `temp_dry,humidity`. |
+| `HERODOT_ENABLED` | No | Set `true` to run Herodot after DMI; defaults to `false`. |
+| `SENSOR_API_URL` | For Herodot | Herodot observations endpoint; defaults to `https://herodot.spac.dk/api/v1/observations`. |
+| `SENSOR_API_TOKEN` | When Herodot is enabled | Secret Bearer token. Store only in local `.env`; do not commit or share it. |
 
 The application builds the versioned observation and station item endpoints
 from `DMI_API_URL` in code, appending
@@ -117,8 +148,9 @@ docker compose up --build app
 This builds and starts the application together with its PostgreSQL
 dependency. The application initializes the database schema and runs the ETL
 workflow: it requests observations from the DMI API, transforms them, and
-saves the source, station locations, and measurements to PostgreSQL. By
-default, it requests only air temperature (`temp_dry`) and humidity
+saves the source, station locations, and measurements to PostgreSQL. When
+`HERODOT_ENABLED=true`, it also imports only Herodot's first observation page.
+By default, it requests only air temperature (`temp_dry`) and humidity
 (`humidity`) for Denmark, limited to the previous 24 hours. Each selected
 parameter is sent directly to DMI as a `parameterId` query filter, avoiding
 requests for unrelated observation types. The pipeline also supports all
@@ -177,22 +209,42 @@ way.
 
 ### Testing
 
-Run the complete test suite, including the unit tests and integration tests:
+Run the unit tests and enforce the required minimum of 95% source coverage:
+
+```bash
+docker compose run --build --rm tests pytest tests/unit --cov=app --cov-report=term-missing --cov-fail-under=95
+```
+
+Run integration tests separately. They connect to PostgreSQL and make a real
+request to the configured DMI API, so database configuration, valid DMI
+settings, and network access to DMI are required:
+
+```bash
+docker compose run --build --rm tests pytest tests/integration -v
+```
+
+Run all tests together with:
 
 ```bash
 docker compose run --build --rm tests
 ```
 
-The test service waits for PostgreSQL to become healthy. Integration tests
-connect to the configured PostgreSQL database and make a real request to the
-DMI API, so the corresponding environment variables must be configured and
-the environment must have network access to DMI.
+Check lint rules, Google-style docstrings, and formatting with Ruff:
+
+```bash
+docker compose run --build --rm --no-deps tests ruff check app tests
+docker compose run --build --rm --no-deps tests ruff format --check app tests
+```
+
+The GitHub Actions workflow runs the style checks, enforces 95% unit-test
+coverage, and runs the integration tests on pull requests to `main`.
 
 ---
 
 ## Local REST API
 
-After configuring `.env`, load DMI data using the standard application command:
+After configuring `.env`, load DMI data and optionally Herodot data using the
+standard application command:
 
 ```bash
 docker compose up --build app
@@ -206,11 +258,11 @@ starts PostgreSQL again if needed:
 docker compose up --build -d api
 ```
 
-If DMI data is already stored, only the API command is needed. Open
+If the required data is already stored, only the API command is needed. Open
 [Swagger UI](http://localhost:8000/docs) to see the endpoints and try requests.
 The API applies pending database migrations at startup and reads PostgreSQL;
-it does not trigger ETL runs or make requests to DMI. The Docker port is bound
-to `127.0.0.1:8000` for local access.
+it does not trigger ETL runs or make requests to upstream sources. The Docker
+port is bound to `127.0.0.1:8000` for local access.
 
 Example request in PowerShell (use `curl` on Linux/macOS):
 
@@ -227,7 +279,7 @@ Measurements support `station_id`, `parameter_id`, timezone-aware `start` and
 
 See the [API user guide](docs/API.md) for the complete endpoint reference,
 setup instructions, request and response examples, error codes, data semantics,
-and test commands. The guide also walks through the complete flow from DMI
+and test commands. The guide also walks through the flow from DMI and Herodot
 imports to validated JSON responses, with the responsibilities of each API
 module and the project's documentation and typing conventions.
 Machine-readable documentation is at
@@ -256,13 +308,15 @@ environment_data_project/
 │   ├── extract/
 │   │   ├── __init__.py
 │   │   ├── base.py
-│   │   └── dmi.py
+│   │   ├── dmi.py
+│   │   └── herodot.py
 │   ├── load/
 │   │   ├── __init__.py
 │   │   └── measurement_repository.py
 │   ├── transform/
 │   │   ├── __init__.py
 │   │   ├── dmi.py
+│   │   ├── herodot.py
 │   │   ├── models.py
 │   │   └── stations.py
 │   ├── database.py
@@ -272,7 +326,9 @@ environment_data_project/
 │   │   ├── 0002_station_locations.sql
 │   │   ├── 0003_dmi_observation_parameters.sql
 │   │   ├── 0004_station_name.sql
-│   │   └── 0005_require_measurement_station.sql
+│   │   ├── 0005_require_measurement_station.sql
+│   │   ├── 0006_allow_unknown_station_metadata.sql
+│   │   └── 0007_preserve_source_reading_ids.sql
 │   ├── main.py
 │   └── pipeline.py
 ├── docs/
@@ -292,6 +348,8 @@ environment_data_project/
 │       ├── test_api_repository.py
 │       ├── test_database.py
 │       ├── test_extract.py
+│       ├── test_herodot_extract.py
+│       ├── test_herodot_transform.py
 │       ├── test_load.py
 │       ├── test_migrations.py
 │       ├── test_main.py
@@ -299,6 +357,9 @@ environment_data_project/
 │       ├── test_stations.py
 │       └── test_transform.py
 ├── .dockerignore
+├── .github/
+│   └── workflows/
+│       └── ci.yml
 ├── .gitignore
 ├── .env.example
 ├── Dockerfile
@@ -313,8 +374,8 @@ environment_data_project/
 
 - The `app` directory contains the application code. Docker starts the
   application through `app/main.py`, which configures and runs the pipeline.
-- The `app/extract` directory contains the code for retrieving data from the
-  DMI API, including a shared abstraction for data sources.
+- The `app/extract` directory contains the clients for retrieving data from
+  DMI and Herodot, including a shared abstraction for data sources.
 - The `app/transform` directory contains pure transformation functions,
   parsing helpers, transformation reports, and measurement and station data
   models.
@@ -324,11 +385,11 @@ environment_data_project/
 - The [app/api](app/api/) directory contains the FastAPI entry point, public response
   models, and read-only PostgreSQL queries. The `api` Compose service runs
   this independently of the one-shot ETL application.
-- [docs/API.md](docs/API.md) documents local API usage, filters, pagination,
-  errors, and examples.
+- [docs/API.md](docs/API.md) documents the REST API, local setup, filters,
+  pagination, acceptance checks, errors, and examples.
 - The `app/migrations` directory contains versioned SQL scripts for creating
   and updating the database schema.
-- `app/pipeline.py` defines the concrete DMI extract-transform-load flow.
+- `app/pipeline.py` defines the DMI and Herodot extract-transform-load flows.
 - `pyproject.toml` configures Ruff linting and formatting rules.
 - `app/database.py` manages database connections, while
   `app/migration_runner.py` discovers and applies SQL migrations.
@@ -374,25 +435,26 @@ execution, and database levels.
 ### Application component overview
 
 - Shows the main application components and their responsibilities.
-- Shows how the application communicates with the DMI API and PostgreSQL.
+- Shows how the application communicates with DMI, Herodot, and PostgreSQL.
 
 ```mermaid
 flowchart LR
     subgraph Application["Application"]
         direction TB
         Main["«component»<br/>Application entry point<br/>app/main.py"]
-        ETL["«component»<br/>Pipeline function<br/>run_dmi_pipeline"]
-        Source["«component»<br/>DMI data source<br/>DMIDataSource"]
+        ETL["«component»<br/>DMI and Herodot pipelines"]
+        Source["«component»<br/>DMI and Herodot data sources"]
         Transformer["«component»<br/>Transformation functions<br/>transform_dmi_observations"]
         Repository["«component»<br/>Measurement repository<br/>MeasurementRepository"]
         Database["«component»<br/>Database connection<br/>app/database.py"]
         Migrations["«component»<br/>Migration runner<br/>app/migration_runner.py"]
         API["«component»<br/>FastAPI REST API<br/>app/api/main.py"]
-        Reader["«component»<br/>DMI read repository<br/>DMIReadRepository"]
+        Reader["«component»<br/>Environmental read repository<br/>EnvironmentalReadRepository"]
     end
 
     Client["API client / Swagger UI"]
     DMI["«external system»<br/>DMI Observation API"]
+    Herodot["«external system»<br/>Herodot observations API"]
     PostgreSQL[("«database»<br/>PostgreSQL")]
 
     Main -.->|configures and runs| ETL
@@ -400,6 +462,7 @@ flowchart LR
     ETL -.->|transforms with| Transformer
     ETL -.->|persists to| Repository
     Source <-->|HTTP observations and station data| DMI
+    Source <-->|HTTP observations (Bearer token)| Herodot
     ETL -.->|opens connection after extraction| Database
     Main -.->|applies migrations| Migrations
     Database -->|connection| PostgreSQL
@@ -416,15 +479,15 @@ flowchart LR
     classDef datastore fill:#ecfdf5,stroke:#059669,color:#064e3b,stroke-width:1.5px
 
     class Main,ETL,Source,Transformer,Repository,Database,Migrations,API,Reader application
-    class DMI,Client external
+    class DMI,Herodot,Client external
     class PostgreSQL datastore
 ```
 
 ### Implementation relationships
 
 - Shows the source and repository classes alongside the ETL functions.
-- The solid inheritance arrow shows that `DMIDataSource` extends
-  `SensorDataSource`.
+- The solid inheritance arrows show that `DMIDataSource` and
+  `HerodotDataSource` extend `SensorDataSource`.
 - The dashed dependencies show how the pipeline connects extraction,
   transformation, and persistence.
 
@@ -441,13 +504,13 @@ classDiagram
 
     class StationDTO {
         +station_id: str
-        +name: str
-        +station_type: str
-        +country_code: str
-        +latitude: float
-        +longitude: float
+        +name: str | None
+        +station_type: str | None
+        +country_code: str | None
+        +latitude: float | None
+        +longitude: float | None
         +station_height: float | None
-        +valid_from: datetime
+        +valid_from: datetime | None
     }
 
     class DMIDataSource {
@@ -455,15 +518,22 @@ classDiagram
         +fetch(params) dict
     }
 
+    class HerodotDataSource {
+        +url: str
+        +fetch(params) dict
+    }
+
     class PipelineFunctions {
         <<module functions>>
         run_dmi_pipeline(observation_source, station_source, parameter_ids, lookback_hours) int
+        run_herodot_pipeline(observation_source, page_size) int
     }
 
     class TransformationFunctions {
         <<module functions>>
         transform_dmi_observations_with_report(raw_json, source_id) TransformResult
         transform_dmi_stations_with_report(raw_json) TransformResult
+        transform_herodot_observations_with_report(raw_json, source_id) TransformResult
         _parse_observed_time(value) datetime | None
         _parse_measurement_value(value) float | None
         _parse_coordinates(geometry) tuple | None
@@ -479,6 +549,8 @@ classDiagram
 
     class MeasurementDTO {
         +source_id: str
+        +source_observation_id: str | None
+        +source_reading_id: str | None
         +station_id: str
         +parameter_id: int
         +timestamp: datetime
@@ -508,6 +580,7 @@ classDiagram
     note for ParameterIds "Only selected values shown; ..."
 
     SensorDataSource <|-- DMIDataSource
+    SensorDataSource <|-- HerodotDataSource
 
     PipelineFunctions --> SensorDataSource : extracts observations and stations
     PipelineFunctions --> MeasurementRepository : persists to
@@ -541,7 +614,12 @@ flowchart TD
     SaveSource["Save DMI source metadata"]
     SaveStations["Save station metadata"]
     SaveMeasurements["Save measurements<br/>(no-op if there are none)"]
-    Count["8. Completion: Return processed measurement count"]
+    Count["8. Completion: Return DMI measurement count"]
+    HerodotEnabled{"HERODOT_ENABLED=true?"}
+    FetchHerodot["EXTRACT: Fetch Herodot first page"]
+    TransformHerodot["TRANSFORM: Normalize supported observations"]
+    LoadHerodot["LOAD: Save source, nodes, and measurements<br/>in a separate transaction"]
+    CountHerodot["Report Herodot measurement count"]
     ReportSuccess["Report successful completion"]
     ReportFailure["Log error and exit<br/>with failure status"]
     Cleanup["Close database connection"]
@@ -553,7 +631,10 @@ flowchart TD
     FetchStations --> TransformStations --> ReportStationSkips --> Fetch
     Fetch --> Transform --> ReportObservationSkips --> Connect --> SaveSource
     SaveSource --> SaveStations --> SaveMeasurements --> Count
-    Count --> Cleanup --> ReportSuccess --> End
+    Count --> Cleanup --> HerodotEnabled
+    HerodotEnabled -->|Yes| FetchHerodot --> TransformHerodot --> LoadHerodot --> CountHerodot
+    CountHerodot --> ReportSuccess
+    HerodotEnabled -->|No| ReportSuccess
     HasURL -->|No| ReportFailure
     ReportFailure --> End
 
@@ -564,6 +645,9 @@ flowchart TD
     TransformStations -. error .-> ReportFailure
     Transform -. error .-> ReportFailure
     Connect -. error .-> ReportFailure
+    FetchHerodot -. error .-> ReportFailure
+    TransformHerodot -. error .-> ReportFailure
+    LoadHerodot -. error .-> ReportFailure
     SaveSource -. error .-> FailureCleanup --> ReportFailure
     SaveStations -. error .-> FailureCleanup
     SaveMeasurements -. error .-> FailureCleanup
@@ -576,8 +660,9 @@ flowchart TD
     classDef failure fill:#fee2e2,color:#7f1d1d,stroke:#dc2626,stroke-width:1.5px
 
     class Start,End terminal
-    class InitSchema,ReadURL,BuildSource,Connect,Fetch,Transform,TransformStations,FetchStations,ReportStationSkips,ReportObservationSkips,SaveSource,SaveStations,SaveMeasurements,Count,Cleanup,FailureCleanup action
+    class InitSchema,ReadURL,BuildSource,Connect,Fetch,Transform,TransformStations,FetchStations,ReportStationSkips,ReportObservationSkips,SaveSource,SaveStations,SaveMeasurements,Count,Cleanup,FailureCleanup,FetchHerodot,TransformHerodot,LoadHerodot,CountHerodot action
     class HasURL decision
+    class HerodotEnabled decision
     class ReportSuccess success
     class ReportFailure failure
 ```
@@ -596,9 +681,10 @@ The workflow proceeds as follows:
 7. **Load:** Save source metadata, station metadata, and measurements in one
    database transaction. The repository skips measurement SQL when there are
    no measurements. A failed load rolls back its writes.
-8. **Completion:** Close the database connection, report the number of
-   processed measurements, and exit. If setup or processing fails, report the
-   error and exit with a failure status.
+8. **Completion:** Close the DMI database connection and report its processed
+   measurement count. If `HERODOT_ENABLED=true`, fetch and transform one
+   Herodot page, then save its source, sensor nodes, and measurements in a
+   separate transaction. Report failures and exit with a failure status.
 
 #### Database migrations
 
@@ -614,8 +700,11 @@ The initial migration creates the original schema using idempotent
 statements, so an existing database created by an earlier version of this
 project can adopt migration tracking without dropping its tables or
 measurement data. Later migrations add station metadata, the complete DMI
-parameter catalogue, rename the station name column to `station_name`, and
-require each measurement to reference a station.
+parameter catalogue, rename the station name column to `station_name`, require
+each measurement to reference a station, and allow unknown Herodot node
+metadata to remain null. Migration `0007_preserve_source_reading_ids.sql`
+stores Herodot source IDs and preserves separate readings that share a
+station, parameter, and timestamp.
 
 Before applying `0005_require_measurement_station.sql` to an existing database,
 check for measurements without a station:
@@ -645,7 +734,7 @@ or requiring DMI configuration.
 
 After a migration has been committed, do not edit or rename it. To change the
 schema, add a new migration file with the next version, such as
-`0006_add_station_history.sql`. This preserves a consistent upgrade path for
+`0008_add_station_history.sql`. This preserves a consistent upgrade path for
 existing installations.
 
 ### Database design
@@ -703,11 +792,19 @@ Each measurement references:
 
 through foreign-key relationships.
 
-The schema also includes a unique constraint on:
+The schema also includes an idempotency key appropriate to the source:
 
 ```sql
-(source_id, station_id, parameter_id, timestamp)
+(source_id, station_id, parameter_id, timestamp) -- legacy/DMI readings
+(source_id, source_reading_id)                   -- readings with a source ID
 ```
+
+Herodot's `observationId` and `readingId` are retained with each measurement.
+The stable `readingId` identifies a Herodot reading across repeated ETL runs,
+while distinct readings at the same node, parameter, and timestamp remain
+separate rows. If a Herodot record has no `readingId`, it is inserted without
+timestamp-based upsert to avoid collapsing potentially distinct readings;
+such rows may repeat on later runs.
 
 #### Entity relationship diagram
 
@@ -733,7 +830,7 @@ erDiagram
     }
 
     DIM_STATIONS {
-        VARCHAR station_id PK "DMI station identifier"
+        VARCHAR station_id PK "DMI station ID or Herodot node ID"
         VARCHAR station_name "Station name"
         VARCHAR station_type "Station type"
         VARCHAR country_code "ISO 3166-1 alpha-3"
@@ -746,6 +843,8 @@ erDiagram
     FACT_MEASUREMENTS {
         SERIAL measurement_id PK "Measurement identifier"
         VARCHAR source_id FK "References DIM_SOURCES"
+        VARCHAR source_observation_id "Source observation ID, if supplied"
+        VARCHAR source_reading_id "Unique source reading ID, if supplied"
         VARCHAR station_id FK "NOT NULL; references DIM_STATIONS"
         INTEGER parameter_id FK "References DIM_PARAMETERS"
         TIMESTAMPTZ timestamp "Observation time"
@@ -758,7 +857,8 @@ erDiagram
 - `DIM_PARAMETERS` defines the measured parameters and their units.
 - `DIM_STATIONS` stores the station identity and its latest known location.
 - `FACT_MEASUREMENTS` stores each environmental observation's timestamp and
-  numeric value.
+  numeric value and retains source-provided observation/reading identifiers
+  when available.
 - Each measurement references exactly one source, station, and parameter
   through foreign keys.
 - A source, station, and parameter can each be referenced by multiple

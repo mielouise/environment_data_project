@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.api.models import Measurement, Parameter, Station
-from app.api.repository import DMIReadRepository
+from app.api.repository import EnvironmentalReadRepository
 
-type RepositoryFixture = tuple[DMIReadRepository, MagicMock]
+type RepositoryFixture = tuple[EnvironmentalReadRepository, MagicMock]
 
 STATION = Station(
     station_id="06180",
@@ -23,6 +23,8 @@ STATION = Station(
 MEASUREMENT = Measurement(
     measurement_id=42,
     source_id="DMI",
+    source_observation_id=None,
+    source_reading_id=None,
     station_id="06180",
     parameter_id=1,
     parameter_name="Temperature",
@@ -37,7 +39,7 @@ def repository() -> RepositoryFixture:
     """Provide a repository and its mocked database cursor."""
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
-    return DMIReadRepository(connection), cursor
+    return EnvironmentalReadRepository(connection), cursor
 
 
 def test_list_measurements_binds_all_filters(
@@ -50,6 +52,7 @@ def test_list_measurements_binds_all_filters(
     end = datetime(2026, 10, 2, tzinfo=UTC)
     injection = "' OR 1=1 --"
     result = reader.list_measurements(
+        source_id="DMI",
         station_id=injection,
         parameter_id=1,
         start=start,
@@ -59,8 +62,8 @@ def test_list_measurements_binds_all_filters(
     )
     query, values = cursor.execute.call_args.args
     assert injection not in query
-    assert values == [injection, 1, start, end, 11, 20]
-    assert "m.source_id = 'DMI'" in query
+    assert values == ["DMI", injection, 1, start, end, 11, 20]
+    assert "m.source_id = %s" in query
     assert "m.timestamp >= %s" in query
     assert "m.timestamp <= %s" in query
     assert "ORDER BY m.timestamp DESC, m.measurement_id DESC" in query
@@ -74,6 +77,7 @@ def test_list_measurements_without_filters(
     reader, cursor = repository
     cursor.fetchall.return_value = []
     reader.list_measurements(
+        source_id=None,
         station_id=None,
         parameter_id=None,
         start=None,
@@ -84,7 +88,7 @@ def test_list_measurements_without_filters(
     query, values = cursor.execute.call_args.args
     assert values == [101, 0]
     assert "m.station_id = %s" not in query
-    assert "m.source_id = 'DMI'" in query
+    assert "m.source_id = %s" not in query
 
 
 def test_station_queries_bind_ids_and_pagination(
@@ -104,30 +108,32 @@ def test_station_queries_bind_ids_and_pagination(
     assert reader.get_station("unknown") is None
 
 
-def test_parameter_query_only_returns_imported_dmi_parameters(
+def test_parameter_query_returns_imported_parameters_across_sources(
     repository: RepositoryFixture,
 ) -> None:
-    """Return typed metadata for imported DMI parameters only."""
+    """Return typed metadata with an optional source filter."""
     reader, cursor = repository
-    parameter = Parameter(
-        parameter_id=1, parameter_name="Temperature", unit="°C"
-    )
+    parameter = Parameter(parameter_id=1, parameter_name="Temperature", unit="°C")
     cursor.fetchall.return_value = [parameter.model_dump()]
     assert reader.list_parameters() == [parameter]
     query = cursor.execute.call_args.args[0]
     assert "EXISTS" in query
-    assert "m.source_id = 'DMI'" in query
+    assert "m.source_id" not in query
+    reader.list_parameters(source_id="HERODOT")
+    query, values = cursor.execute.call_args.args
+    assert "m.source_id = %s" in query
+    assert values == ("HERODOT",)
 
 
-def test_get_measurement_is_scoped_to_dmi(
+def test_get_measurement_is_not_scoped_to_source(
     repository: RepositoryFixture,
 ) -> None:
-    """Check DMI provenance and return None for missing IDs."""
+    """Return any source's measurement and None for missing IDs."""
     reader, cursor = repository
     cursor.fetchone.return_value = MEASUREMENT.model_dump()
     assert reader.get_measurement(42) == MEASUREMENT
     query, values = cursor.execute.call_args.args
-    assert "m.source_id = 'DMI'" in query
+    assert "m.source_id = 'DMI'" not in query
     assert values == (42,)
     cursor.fetchone.return_value = None
     assert reader.get_measurement(999) is None

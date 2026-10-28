@@ -1,4 +1,4 @@
-"""Expose stored DMI data through a versioned, read-only REST API.
+"""Expose stored environmental data through a versioned, read-only REST API.
 
 Run ``uvicorn app.api.main:app --host 127.0.0.1`` to start the API.
 Startup applies migrations; dependencies manage database connections;
@@ -31,7 +31,7 @@ from app.api.models import (
     Parameter,
     Station,
 )
-from app.api.repository import DMIReadRepository
+from app.api.repository import EnvironmentalReadRepository
 from app.database import get_connection
 from app.migration_runner import apply_migrations
 
@@ -56,21 +56,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="DMI Environmental Data API",
+    title="Environmental Data API",
     version="1.0.0",
     description=(
-        "Read DMI observations stored by the ETL pipeline. "
+        "Read DMI and sensor observations stored by the ETL pipelines. "
         "Data is refreshed by running the ETL, not by making API requests. "
         "Start with /api/v1/parameters and /api/v1/stations to discover data."
     ),
     lifespan=lifespan,
-    responses={
-        503: {"model": ErrorResponse, "description": "Database unavailable"}
-    },
+    responses={503: {"model": ErrorResponse, "description": "Database unavailable"}},
 )
 
 
-def get_repository() -> Generator[DMIReadRepository, None, None]:
+def get_repository() -> Generator[EnvironmentalReadRepository, None, None]:
     """Provide a repository with a read-only transaction.
 
     Yields:
@@ -83,23 +81,17 @@ def get_repository() -> Generator[DMIReadRepository, None, None]:
     """
     with get_connection() as connection:
         connection.read_only = True
-        yield DMIReadRepository(connection)
+        yield EnvironmentalReadRepository(connection)
 
 
-Repository = Annotated[DMIReadRepository, Depends(get_repository)]
-Limit = Annotated[
-    int, Query(ge=1, le=1000, description="Maximum items per page.")
-]
-Offset = Annotated[
-    int, Query(ge=0, description="Number of matching items to skip.")
-]
+Repository = Annotated[EnvironmentalReadRepository, Depends(get_repository)]
+Limit = Annotated[int, Query(ge=1, le=1000, description="Maximum items per page.")]
+Offset = Annotated[int, Query(ge=0, description="Number of matching items to skip.")]
 router = APIRouter(prefix="/api/v1")
 
 
 @app.exception_handler(psycopg.Error)
-async def database_error_handler(
-    request: Request, exc: psycopg.Error
-) -> JSONResponse:
+async def database_error_handler(request: Request, exc: psycopg.Error) -> JSONResponse:
     """Translate a database failure to a generic HTTP 503 JSON response.
 
     Args:
@@ -130,9 +122,12 @@ def health(repository: Repository) -> HealthResponse:
 
 
 @router.get("/parameters", tags=["Parameters"], response_model=list[Parameter])
-def parameters(repository: Repository) -> list[Parameter]:
-    """List parameter IDs and units with imported DMI measurements."""
-    return repository.list_parameters()
+def parameters(
+    repository: Repository,
+    source_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+) -> list[Parameter]:
+    """List parameter IDs and units with imported measurements."""
+    return repository.list_parameters(source_id=source_id)
 
 
 @router.get("/stations", tags=["Stations"], response_model=Page[Station])
@@ -157,9 +152,7 @@ def stations(
     "/stations/{station_id}",
     tags=["Stations"],
     response_model=Station,
-    responses={
-        404: {"model": ErrorResponse, "description": "Station not found"}
-    },
+    responses={404: {"model": ErrorResponse, "description": "Station not found"}},
 )
 def station(
     station_id: Annotated[str, Path(min_length=1, max_length=50)],
@@ -168,7 +161,7 @@ def station(
     """Get one station, preserving leading zeros in its ID.
 
     Args:
-        station_id: DMI station identifier, treated as text.
+        station_id: Station or sensor node identifier, treated as text.
         repository: Injected read-only repository.
 
     Returns:
@@ -183,14 +176,11 @@ def station(
     return row
 
 
-@router.get(
-    "/measurements", tags=["Measurements"], response_model=Page[Measurement]
-)
+@router.get("/measurements", tags=["Measurements"], response_model=Page[Measurement])
 def measurements(
     repository: Repository,
-    station_id: Annotated[
-        str | None, Query(min_length=1, max_length=50)
-    ] = None,
+    source_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
+    station_id: Annotated[str | None, Query(min_length=1, max_length=50)] = None,
     parameter_id: Annotated[
         int | None,
         Query(ge=1, description="Database ID from /api/v1/parameters."),
@@ -206,11 +196,12 @@ def measurements(
     limit: Limit = 100,
     offset: Offset = 0,
 ) -> Page[Measurement]:
-    """List DMI measurements, newest first, with optional filters.
+    """List environmental measurements, newest first, with optional filters.
 
     Args:
         repository: Injected read-only repository.
-        station_id: DMI station identifier, or None for all stations.
+        source_id: Source ID, or None to include every source.
+        station_id: Station or sensor node ID, or None for all stations.
         parameter_id: Database parameter ID, or None for all types.
         start: Inclusive earliest timestamp, including a timezone.
         end: Inclusive latest timestamp, including a timezone.
@@ -228,6 +219,7 @@ def measurements(
             status_code=422, detail="start must be before or equal to end."
         )
     rows = repository.list_measurements(
+        source_id=source_id,
         station_id=station_id,
         parameter_id=parameter_id,
         start=start,
@@ -242,24 +234,22 @@ def measurements(
     "/measurements/{measurement_id}",
     tags=["Measurements"],
     response_model=Measurement,
-    responses={
-        404: {"model": ErrorResponse, "description": "Measurement not found"}
-    },
+    responses={404: {"model": ErrorResponse, "description": "Measurement not found"}},
 )
 def measurement(
     measurement_id: Annotated[int, Path(ge=1)], repository: Repository
 ) -> Measurement:
-    """Get one DMI measurement with its parameter name and unit.
+    """Get one measurement with its parameter name and unit.
 
     Args:
         measurement_id: Database primary key of the observation.
         repository: Injected read-only repository.
 
     Returns:
-        The stored DMI observation and its parameter metadata.
+        The stored observation and its parameter metadata.
 
     Raises:
-        HTTPException: HTTP 404 for an unknown or non-DMI ID.
+        HTTPException: HTTP 404 for an unknown ID.
     """
     row = repository.get_measurement(measurement_id)
     if row is None:
@@ -267,9 +257,7 @@ def measurement(
     return row
 
 
-def _page[ItemT](
-    rows: Sequence[ItemT], limit: int, offset: int
-) -> Page[ItemT]:
+def _page[ItemT](rows: Sequence[ItemT], limit: int, offset: int) -> Page[ItemT]:
     """Build a typed response page using one extra row as a lookahead.
 
     Args:

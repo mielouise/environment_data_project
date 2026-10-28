@@ -5,6 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt .
 COPY requirements-dev.txt .
+COPY pyproject.toml .
 
 RUN pip install --no-cache-dir -r requirements-dev.txt
 
