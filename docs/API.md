@@ -13,7 +13,8 @@ station metadata, and parameter definitions through the endpoints below.
 5. [Understand error responses](#understand-error-responses)
 6. [Follow the implementation](#follow-the-implementation)
 7. [Check code quality and run tests](#check-code-quality-and-run-tests)
-8. [Refresh data and prepare for deployment](#refresh-data-and-prepare-for-deployment)
+8. [Local acceptance check](#local-acceptance-check)
+9. [Refresh data and prepare for deployment](#refresh-data-and-prepare-for-deployment)
 
 ## Run the API locally
 
@@ -366,6 +367,29 @@ Run the full suite, including the existing DMI connectivity test, with:
 ```powershell
 docker compose run --build --rm tests
 ```
+
+## Local acceptance check
+
+After completing the local setup and importing DMI data, use Swagger UI at
+<http://localhost:8000/docs> to perform these checks. Select station IDs,
+parameter IDs, and timestamps from returned measurements when testing filters.
+
+| Check | Expected result |
+| --- | --- |
+| Open `/docs` | Endpoints, parameters, and response schemas are available. |
+| Request `/health` | HTTP 200 with `{"status":"ok"}`. |
+| Request `/api/v1/measurements?limit=2` | HTTP 200 with stored measurements, including station ID, timestamp, value, and unit; at most two items. |
+| Filter measurements by station, parameter, and time interval | Every returned item matches all filters, including the time boundaries. |
+| Follow a page with `has_more: true` | Increasing `offset` by `limit` returns the next page with unchanged filters. Run this check without another ETL import between requests. |
+| Request `/api/v1/measurements?limit=0` | HTTP 422 describing the invalid input. |
+| Request `/api/v1/stations/unknown` | HTTP 404. |
+| Request `/api/v1/measurements?station_id=unknown` | HTTP 200 with `items: []` and `has_more: false`. |
+
+Record each check as passed or failed. Save one successful measurement request
+and its actual JSON response as the demonstration example, together with the
+test date. If no measurements are returned, verify that the ETL import
+completed and that the selected filters match stored data before accepting
+the result.
 
 ## Refresh data and prepare for deployment
 
