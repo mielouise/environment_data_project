@@ -462,7 +462,7 @@ flowchart LR
     ETL -.->|transforms with| Transformer
     ETL -.->|persists to| Repository
     Source <-->|HTTP observations and station data| DMI
-    Source <-->|HTTP observations (Bearer token)| Herodot
+    Source <-->|"HTTP observations (Bearer token)"| Herodot
     ETL -.->|opens connection after extraction| Database
     Main -.->|applies migrations| Migrations
     Database -->|connection| PostgreSQL
